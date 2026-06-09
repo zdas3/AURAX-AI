@@ -1,0 +1,111 @@
+@import "tailwindcss";
+
+@theme {
+  --color-gold-50: #fdfbf7;
+  --color-gold-100: #fbf7eb;
+  --color-gold-200: #f4eacc;
+  --color-gold-300: #ead59b;
+  --color-gold-400: #dbb963;
+  --color-gold-500: #d4af37;
+  --color-gold-600: #b9922b;
+  --color-gold-700: #977123;
+  --color-gold-800: #795720;
+  --color-gold-900: #64471c;
+  --color-gold-950: #3a270e;
+  
+  --color-obsidian-50: #f6f6f7;
+  --color-obsidian-100: #e3e3e6;
+  --color-obsidian-200: #c6c6cc;
+  --color-obsidian-300: #a2a2aa;
+  --color-obsidian-400: #7e7e87;
+  --color-obsidian-500: #62626b;
+  --color-obsidian-600: #4e4e55;
+  --color-obsidian-700: #404046;
+  --color-obsidian-800: #222227;
+  --color-obsidian-900: #121214;
+  --color-obsidian-950: #0B0B0C;
+  
+  --animate-neon-pulse: neon-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+:root {
+  --background: #0B0B0C;
+  --foreground: #f3f4f6;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  overflow-x: hidden;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0B0B0C;
+}
+::-webkit-scrollbar-thumb {
+  background: #222227;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #d4af37;
+}
+
+/* Glassmorphism Classes */
+.glass-panel {
+  background: rgba(18, 18, 20, 0.75);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(212, 175, 55, 0.08);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.6);
+}
+
+.glass-panel-glow {
+  background: rgba(18, 18, 20, 0.85);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(212, 175, 55, 0.15);
+  box-shadow: 0 0 20px rgba(212, 175, 55, 0.06);
+}
+
+.gold-gradient-text {
+  background: linear-gradient(135deg, #FFE89C 0%, #D4AF37 50%, #8A640F 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.gold-glow-hover {
+  transition: all 0.3s ease;
+}
+
+.gold-glow-hover:hover {
+  box-shadow: 0 0 15px rgba(212, 175, 55, 0.25);
+  border-color: rgba(212, 175, 55, 0.4);
+}
+
+/* Candlestick grid animation */
+@keyframes gridDrift {
+  0% { background-position: 0 0; }
+  100% { background-position: 40px 40px; }
+}
+
+.animated-grid {
+  background-size: 40px 40px;
+  background-image: linear-gradient(to right, rgba(212, 175, 55, 0.02) 1px, transparent 1px),
+                    linear-gradient(to bottom, rgba(212, 175, 55, 0.02) 1px, transparent 1px);
+  animation: gridDrift 20s linear infinite;
+}
+
+/* Pulse animation for live indicators */
+@keyframes neon-pulse {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 8px rgba(212, 175, 55, 0.6);
+  }
+  50% {
+    opacity: 0.4;
+    box-shadow: 0 0 2px rgba(212, 175, 55, 0.2);
+  }
+}
