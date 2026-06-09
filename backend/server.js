@@ -47,3 +47,5 @@ app.get('/health', (req, res) => {
 app.listen(PORT, () => {
   console.log(`Aurax Backend Proxy running on port ${PORT}`);
 });
+
+export default app;
