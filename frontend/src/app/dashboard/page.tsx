@@ -4,7 +4,9 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { User, Bookmark, Bell, Shield, ArrowLeft, Trash2, Plus, LogOut, CheckCircle } from "lucide-react";
 
-const BACKEND_URL = "http://localhost:5000";
+const BACKEND_URL = typeof window !== "undefined" && window.location.hostname !== "localhost"
+  ? "/_/backend"
+  : "http://localhost:5000";
 
 export default function DashboardPage() {
   const [savedSetups, setSavedSetups] = useState<any[]>([]);

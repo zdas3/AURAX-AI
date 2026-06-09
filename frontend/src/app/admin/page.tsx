@@ -4,7 +4,9 @@ import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { Shield, Settings, Server, RefreshCw, Send, ArrowLeft, CheckCircle, AlertTriangle, Play } from "lucide-react";
 
-const BACKEND_URL = "http://localhost:5000";
+const BACKEND_URL = typeof window !== "undefined" && window.location.hostname !== "localhost"
+  ? "/_/backend"
+  : "http://localhost:5000";
 
 export default function AdminPage() {
   const [isSending, setIsSending] = useState<boolean>(false);

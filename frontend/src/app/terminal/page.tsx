@@ -7,7 +7,9 @@ import {
   RefreshCw, Save, ArrowRight, Share2, Layers, MessageSquare, AlertCircle, BarChart3
 } from "lucide-react";
 
-const BACKEND_URL = "http://localhost:5000";
+const BACKEND_URL = typeof window !== "undefined" && window.location.hostname !== "localhost"
+  ? "/_/backend"
+  : "http://localhost:5000";
 
 // Interface Definitions
 interface Signal {
