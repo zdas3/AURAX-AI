@@ -149,6 +149,7 @@ router.get('/candles', async (req, res) => {
       '1m': '1min',
       '5m': '5min',
       '15m': '15min',
+      '30m': '30min',
       '1H': '1h',
       '4H': '4h',
       'Daily': '1day'

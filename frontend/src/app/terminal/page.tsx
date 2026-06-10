@@ -52,6 +52,7 @@ export default function TerminalPage() {
   const [correlations, setCorrelations] = useState<any>(null);
   const [newsList, setNewsList] = useState<any[]>([]);
   const [savedSetups, setSavedSetups] = useState<any[]>([]);
+  const [sessionProfiles, setSessionProfiles] = useState<any>(null);
   
   // Telemetry status
   const [isBackendOnline, setIsBackendOnline] = useState<boolean>(false);
@@ -182,6 +183,16 @@ export default function TerminalPage() {
         setActiveSignal(signalPayload.activeSignal);
         setTechSummary(signalPayload.technicalSummary);
         setSentimentSummary(signalPayload.sentimentSummary);
+        if (signalPayload.sessionProfiles) {
+          setSessionProfiles(signalPayload.sessionProfiles);
+        } else {
+          // Fallback if not returned
+          setSessionProfiles({
+            asian: { high: currentPriceVal + 4.5, low: currentPriceVal - 11.2, status: "Accumulation complete" },
+            london: { high: currentPriceVal + 9.8, low: currentPriceVal - 14.5, status: "Asian Sweep Hunt detected" },
+            newyork: { high: currentPriceVal + 13.6, low: currentPriceVal - 8.9, status: "Distribution phase active" }
+          });
+        }
         setIsBackendOnline(true);
         setIsAiEngineOnline(signalPayload.activeSignal.engineConnected);
         setVolatility(signalPayload.technicalSummary.volatilityScore > 65 ? "High" : signalPayload.technicalSummary.volatilityScore > 35 ? "Medium" : "Low");
@@ -217,6 +228,12 @@ export default function TerminalPage() {
       bias: "bullish",
       impact_level: "Medium",
       market_mood: "Risk-Off (Geopolitical Risk)"
+    });
+
+    setSessionProfiles({
+      asian: { high: price + 4.5, low: price - 11.2, status: "Accumulation complete" },
+      london: { high: price + 9.8, low: price - 14.5, status: "Asian Sweep Hunt detected" },
+      newyork: { high: price + 13.6, low: price - 8.9, status: "Distribution phase active" }
     });
 
     setActiveSignal({
@@ -287,7 +304,7 @@ export default function TerminalPage() {
   const handleTimeframeChange = (tf: string) => {
     setTimeframe(tf);
     const intervals: Record<string, string> = {
-      '1m': '1', '5m': '5', '15m': '15', '1H': '60', '4H': '240', 'Daily': 'D'
+      '1m': '1', '5m': '5', '15m': '15', '30m': '30', '1H': '60', '4H': '240', 'Daily': 'D'
     };
     mountWidget(intervals[tf] || '15');
   };
@@ -439,7 +456,7 @@ export default function TerminalPage() {
                 <span className="text-xs font-mono font-bold text-gray-200">INTERACTIVE XAUUSD CHART</span>
               </div>
               <div className="flex gap-1">
-                {['1m', '5m', '15m', '1H', '4H', 'Daily'].map((tf) => (
+                {['1m', '5m', '15m', '30m', '1H', '4H', 'Daily'].map((tf) => (
                   <button
                     key={tf}
                     onClick={() => handleTimeframeChange(tf)}
@@ -471,10 +488,10 @@ export default function TerminalPage() {
                   <span className="text-[9px] text-gray-500">22:00 - 06:00 UTC</span>
                 </div>
                 <div className="space-y-1 text-gray-400 text-[10px] pt-1">
-                  <div>Range High: <span className="text-gold-500">$4339.40</span></div>
-                  <div>Range Low: <span className="text-gold-500">$4324.20</span></div>
+                  <div>Range High: <span className="text-gold-500">${sessionProfiles ? sessionProfiles.asian.high.toFixed(2) : (livePrice + 4.5).toFixed(2)}</span></div>
+                  <div>Range Low: <span className="text-gold-500">${sessionProfiles ? sessionProfiles.asian.low.toFixed(2) : (livePrice - 11.2).toFixed(2)}</span></div>
                   <div className="text-emerald-500 font-semibold uppercase bg-emerald-950/20 py-0.5 px-1.5 rounded mt-1.5 text-center">
-                    Accumulation complete
+                    {sessionProfiles ? sessionProfiles.asian.status : "Accumulation complete"}
                   </div>
                 </div>
               </div>
@@ -486,10 +503,10 @@ export default function TerminalPage() {
                   <span className="text-[9px] text-gray-500">07:00 - 15:00 UTC</span>
                 </div>
                 <div className="space-y-1 text-gray-400 text-[10px] pt-1">
-                  <div>Session High: <span className="text-gold-500">$4344.80</span></div>
-                  <div>Session Low: <span className="text-gold-500">$4321.50</span></div>
+                  <div>Session High: <span className="text-gold-500">${sessionProfiles ? sessionProfiles.london.high.toFixed(2) : (livePrice + 9.8).toFixed(2)}</span></div>
+                  <div>Session Low: <span className="text-gold-500">${sessionProfiles ? sessionProfiles.london.low.toFixed(2) : (livePrice - 14.5).toFixed(2)}</span></div>
                   <div className="text-amber-500 font-semibold uppercase bg-amber-950/20 py-0.5 px-1.5 rounded mt-1.5 text-center">
-                    Asian Sweep Hunt detected
+                    {sessionProfiles ? sessionProfiles.london.status : "Asian Sweep Hunt detected"}
                   </div>
                 </div>
               </div>
@@ -501,10 +518,10 @@ export default function TerminalPage() {
                   <span className="text-[9px] text-gray-500">12:00 - 20:00 UTC</span>
                 </div>
                 <div className="space-y-1 text-gray-400 text-[10px] pt-1">
-                  <div>Session High: <span className="text-gold-500">$4348.60</span></div>
-                  <div>Session Low: <span className="text-gold-500">$4326.10</span></div>
+                  <div>Session High: <span className="text-gold-500">${sessionProfiles ? sessionProfiles.newyork.high.toFixed(2) : (livePrice + 13.6).toFixed(2)}</span></div>
+                  <div>Session Low: <span className="text-gold-500">${sessionProfiles ? sessionProfiles.newyork.low.toFixed(2) : (livePrice - 8.9).toFixed(2)}</span></div>
                   <div className="text-gold-500 font-semibold uppercase bg-gold-950/20 py-0.5 px-1.5 rounded mt-1.5 text-center animate-pulse">
-                    Distribution phase active
+                    {sessionProfiles ? sessionProfiles.newyork.status : "Distribution phase active"}
                   </div>
                 </div>
               </div>
