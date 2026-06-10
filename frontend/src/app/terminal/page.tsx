@@ -14,6 +14,7 @@ const BACKEND_URL = typeof window !== "undefined" && window.location.hostname !=
 // Interface Definitions
 interface Signal {
   id: string;
+  timestamp?: string;
   symbol: string;
   direction: string;
   entry: number | null;
@@ -53,6 +54,7 @@ export default function TerminalPage() {
   const [newsList, setNewsList] = useState<any[]>([]);
   const [savedSetups, setSavedSetups] = useState<any[]>([]);
   const [sessionProfiles, setSessionProfiles] = useState<any>(null);
+  const [timeRemaining, setTimeRemaining] = useState<string | null>(null);
   
   // Telemetry status
   const [isBackendOnline, setIsBackendOnline] = useState<boolean>(false);
@@ -294,6 +296,36 @@ export default function TerminalPage() {
     };
   }, []);
 
+  // Countdown timer for 30-minute signal lock
+  useEffect(() => {
+    if (!activeSignal || !activeSignal.timestamp) {
+      setTimeRemaining(null);
+      return;
+    }
+
+    const updateCountdown = () => {
+      const signalTime = new Date(activeSignal.timestamp || "").getTime();
+      const nextSignalTime = signalTime + 1800000; // 30 minutes in ms
+      const now = Date.now();
+      const diff = nextSignalTime - now;
+
+      if (diff <= 0) {
+        setTimeRemaining("00:00");
+        pollIntelligence(timeframe);
+      } else {
+        const minutes = Math.floor(diff / 60000);
+        const seconds = Math.floor((diff % 60000) / 1000);
+        setTimeRemaining(
+          `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+        );
+      }
+    };
+
+    updateCountdown();
+    const timer = setInterval(updateCountdown, 1000);
+    return () => clearInterval(timer);
+  }, [activeSignal, timeframe]);
+
   const handleManualRefresh = () => {
     fetchNews();
     fetchCorrelation();
@@ -414,9 +446,6 @@ export default function TerminalPage() {
         </div>
 
         <nav className="flex items-center gap-4 text-xs font-mono">
-          <button onClick={handleManualRefresh} className="p-2 rounded hover:bg-obsidian-900 border border-transparent hover:border-gold-900/10 text-gray-400 hover:text-gold-500 transition-all">
-            <RefreshCw className="w-4 h-4" />
-          </button>
           <Link href="/dashboard" className="text-gray-400 hover:text-gold-500 transition-colors">Dashboard</Link>
           <Link href="/admin" className="text-gray-400 hover:text-gold-500 transition-colors">Admin Panel</Link>
           <Link href="/" className="text-gray-400 hover:text-gold-500 transition-colors">Exit</Link>
@@ -597,9 +626,16 @@ export default function TerminalPage() {
               <div className="space-y-5">
                 <div className="flex justify-between items-center">
                   <span className="text-[10px] font-mono text-gold-600 uppercase font-black tracking-widest">ACTIVE TRADING SIGNAL</span>
-                  <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-gold-950/20 border border-gold-500/20 text-gold-500 font-bold uppercase">
-                    XAUUSD
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {timeRemaining && (
+                      <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-gold-950/40 border border-gold-500/20 text-gold-500 font-black animate-pulse">
+                        NEXT IN: {timeRemaining}
+                      </span>
+                    )}
+                    <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-gold-950/20 border border-gold-500/20 text-gold-500 font-bold uppercase">
+                      XAUUSD
+                    </span>
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-3">
