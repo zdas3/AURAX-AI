@@ -1,6 +1,7 @@
 import express from 'express';
 import axios from 'axios';
 import dotenv from 'dotenv';
+import { getMarketState, updateMarketPrice } from '../marketEngine.js';
 
 dotenv.config();
 const router = express.Router();
@@ -64,50 +65,25 @@ const mockHeadlines = [
   { title: "US 10-Year Treasury Yield drops to 4.12% as bond demand rises", description: "Yield curves flattened today showing market pricing in dovish federal policy.", source: "MarketWatch" }
 ];
 
-// 1. Get Live Price
-router.get('/price', async (req, res) => {
-  try {
-    const { priceCache } = getCaches(req);
-    const CACHE_DURATION = 20000; // 20 seconds cache
-    const now = Date.now();
+// 1. Get Live Price / Set Live Price (POST triggers centralized engine)
+router.get('/price', (req, res) => {
+  res.json({
+    price: getMarketState().price,
+    timestamp: getMarketState().timestamp
+  });
+});
 
-    // If cache is fresh, return a simulated ticking price based on the base price
-    if (now - priceCache.timestamp < CACHE_DURATION && !priceCache.simulated) {
-      // Calculate a slight random drift based on elapsed time to make ticks look alive
-      const elapsedSeconds = (now - priceCache.timestamp) / 1000;
-      const walk = (Math.random() - 0.5) * 0.2 * elapsedSeconds;
-      const simulatedPrice = parseFloat((priceCache.price + walk).toFixed(2));
-      return res.json({ price: simulatedPrice, timestamp: now, cached: true });
-    }
-
-    try {
-      const response = await axios.get(`https://api.twelvedata.com/price`, {
-        params: {
-          symbol: 'XAU/USD',
-          apikey: keys.twelvedata
-        },
-        timeout: 4000
-      });
-      
-      if (response.data && response.data.price) {
-        priceCache.price = parseFloat(response.data.price);
-        priceCache.timestamp = now;
-        priceCache.simulated = false;
-        return res.json({ price: priceCache.price, timestamp: now, cached: false });
-      }
-      
-      throw new Error("Invalid response structure from Twelve Data");
-    } catch (apiError) {
-      // API failed or hit limits - perform tiny random walk on cached price to simulate live movement
-      const walk = (Math.random() - 0.5) * 0.35;
-      priceCache.price = parseFloat((priceCache.price + walk).toFixed(2));
-      priceCache.timestamp = now;
-      priceCache.simulated = true;
-      return res.json({ price: priceCache.price, timestamp: now, simulated: true });
-    }
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+router.post('/price', (req, res) => {
+  const { price } = req.body;
+  if (price === undefined || isNaN(price)) {
+    return res.status(400).json({ error: "Invalid price parameter" });
   }
+  updateMarketPrice(parseFloat(price));
+  res.json({
+    success: true,
+    price: getMarketState().price,
+    timestamp: getMarketState().timestamp
+  });
 });
 
 // 2. Get Historical Candles (Supports multi-timeframe 1m, 5m, 15m, 1h, 4h, 1d)
@@ -116,12 +92,12 @@ router.get('/candles', async (req, res) => {
   const limit = parseInt(req.query.limit) || 100;
   
   try {
-    const { priceCache, candlesCache } = getCaches(req);
+    const { candlesCache } = getCaches(req);
     const now = Date.now();
     const cacheKey = `${timeframe}_${limit}`;
     const cachedData = candlesCache[cacheKey];
     
-    const currentPrice = priceCache.price;
+    const currentPrice = getMarketState().price;
     
     // Inline helper to sync the final candle with the live quote price
     const returnUpdatedCandles = (candles) => {
@@ -195,116 +171,27 @@ router.get('/candles', async (req, res) => {
 });
 
 // 3. Get News & Sentiment Headlines
-router.get('/news', async (req, res) => {
-  try {
-    const { newsCache } = getCaches(req);
-    const now = Date.now();
-    
-    // Cache news for 2 minutes to fulfill the frequent polling request
-    if (now - newsCache.timestamp < 120000 && newsCache.articles.length > 0) {
-      return res.json(newsCache.articles);
-    }
-
-    try {
-      let articles = [];
-      
-      // Try NewsAPI first
-      if (keys.newsapi) {
-        const response = await axios.get('https://newsapi.org/v2/everything', {
-          params: {
-            q: 'gold price OR inflation OR federal reserve OR CPI OR FOMC',
-            language: 'en',
-            sortBy: 'publishedAt',
-            pageSize: 10,
-            apiKey: keys.newsapi
-          },
-          timeout: 4000
-        });
-        
-        if (response.data && response.data.articles) {
-          articles = response.data.articles.map(art => ({
-            title: art.title,
-            description: art.description,
-            url: art.url,
-            source: art.source?.name || "NewsAPI",
-            publishedAt: art.publishedAt
-          }));
-        }
-      }
-      
-      // Fallback to Finnhub News if NewsAPI fails/not provided
-      if (articles.length === 0 && keys.finnhub) {
-        const response = await axios.get('https://finnhub.io/api/v1/news', {
-          params: {
-            category: 'general',
-            token: keys.finnhub
-          },
-          timeout: 4000
-        });
-        if (response.data && Array.isArray(response.data)) {
-          articles = response.data.slice(0, 10).map(art => ({
-            title: art.headline,
-            description: art.summary,
-            url: art.url,
-            source: art.source || "Finnhub",
-            publishedAt: new Date(art.datetime * 1000).toISOString()
-          }));
-        }
-      }
-
-      if (articles.length > 0) {
-        newsCache.articles = articles;
-        newsCache.timestamp = now;
-        return res.json(articles);
-      }
-      
-      throw new Error("No news articles fetched from APIs");
-    } catch (apiError) {
-      // Fallback to realistic mock headlines
-      const mockArticles = mockHeadlines.map((hl, idx) => ({
-        ...hl,
-        publishedAt: new Date(now - idx * 3600000).toISOString(),
-        url: "#"
-      }));
-      newsCache.articles = mockArticles;
-      newsCache.timestamp = now;
-      return res.json(mockArticles);
-    }
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+router.get('/news', (req, res) => {
+  res.json(getMarketState().newsList || []);
 });
 
 // 4. Get Correlation Matrix (DXY, US10Y, SPX500, Oil)
 router.get('/correlation', (req, res) => {
-  // Live correlation data shifts slowly
-  if (Date.now() - correlationCache.timestamp < 300000 && correlationCache.data) {
-    return res.json(correlationCache.data);
-  }
+  res.json({
+    correlations: getMarketState().correlations,
+    sensitivities: {
+      "DXY": "High Inverse Sensitivity",
+      "US10Y": "High Negative Sensitivity (Yield competitor)",
+      "SPX500": "Low Cyclical Correlation",
+      "CrudeOil": "Moderate Commodity Tailwind"
+    },
+    timestamp: new Date(getMarketState().lastUpdateTimes.correlation).toISOString()
+  });
+});
 
-  // Dynamic theoretical range with small noise walk to look active
-  const noise = () => (Math.random() - 0.5) * 0.04;
-  
-  const correlations = {
-    "DXY": parseFloat((-0.82 + noise()).toFixed(2)),
-    "US10Y": parseFloat((-0.74 + noise()).toFixed(2)),
-    "SPX500": parseFloat((0.08 + noise()).toFixed(2)),
-    "CrudeOil": parseFloat((0.52 + noise()).toFixed(2))
-  };
-
-  const sensitivities = {
-    "DXY": "High Inverse Sensitivity",
-    "US10Y": "High Negative Sensitivity (Yield competitor)",
-    "SPX500": "Low Cyclical Correlation",
-    "CrudeOil": "Moderate Commodity Tailwind"
-  };
-
-  correlationCache = {
-    data: { correlations, sensitivities, timestamp: new Date().toISOString() },
-    timestamp: Date.now()
-  };
-
-  return res.json(correlationCache.data);
+// 5. Get Complete Centralized State
+router.get('/state', (req, res) => {
+  res.json(getMarketState());
 });
 
 export default router;

@@ -69,6 +69,11 @@ export default function TerminalPage() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [saveStatus, setSaveStatus] = useState<string>("");
 
+  const [logs, setLogs] = useState<string[]>([]);
+  const [dataFreshness, setDataFreshness] = useState<any>({});
+  const [marketRegime, setMarketRegime] = useState<string>("Neutral Consolidation");
+  const [showDebugLogs, setShowDebugLogs] = useState<boolean>(false);
+
   const scriptLoaded = useRef(false);
 
   // 1. Initialize TradingView Widget
@@ -152,156 +157,131 @@ export default function TerminalPage() {
     }
   };
 
-  // Fetch Price & Signals (Fast Loop - every 3.5 seconds)
+  // Poll Centralized Market State (Fallback mechanism)
   const pollIntelligence = async (currentTimeframe: string) => {
     setLiveStatus("UPDATING");
-    let currentPriceVal = livePrice;
-    
-    // Fetch latest price
     try {
-      const priceRes = await fetch(`${BACKEND_URL}/api/market/price`);
-      const priceData = await priceRes.json();
-      if (priceData && priceData.price) {
+      const res = await fetch(`${BACKEND_URL}/api/market/state`);
+      const state = await res.json();
+      if (state && state.price) {
         setLivePrice((prev) => {
-          if (priceData.price > prev) setPriceDirection("up");
-          else if (priceData.price < prev) setPriceDirection("down");
+          if (state.price > prev) setPriceDirection("up");
+          else if (state.price < prev) setPriceDirection("down");
           else setPriceDirection("flat");
-          return priceData.price;
+          return state.price;
         });
-        currentPriceVal = priceData.price;
-        setSpread(parseFloat((1.0 + Math.random() * 0.4).toFixed(1)));
+        setSpread(state.spread);
+        setActiveSignal(state.activeSignal);
+        setTechSummary(state.technicalSummary);
+        setSentimentSummary(state.sentimentSummary);
+        setSessionProfiles(state.sessionProfiles);
+        setCorrelations(state.correlations);
+        setNewsList(state.newsList || []);
+        setLogs(state.logs || []);
+        setDataFreshness(state.dataFreshness || {});
+        setMarketRegime(state.marketRegime || "Neutral Consolidation");
+        
         setIsBackendOnline(true);
+        setIsAiEngineOnline(state.activeSignal?.id ? true : false);
+        setVolatility(state.technicalSummary.volatilityScore > 65 ? "High" : state.technicalSummary.volatilityScore > 35 ? "Medium" : "Low");
+        setIsLoading(false);
       }
     } catch (e) {
-      console.warn("Failed to fetch live price:", e);
-      // Offline simulated price movement
-      setLivePrice((prev) => {
-        const walk = (Math.random() - 0.5) * 0.35;
-        setPriceDirection(walk > 0 ? "up" : walk < 0 ? "down" : "flat");
-        return parseFloat((prev + walk).toFixed(2));
-      });
-    }
-
-    setLiveStatus("AI ANALYZING");
-
-    // Fetch latest signals & technical indicators
-    try {
-      const signalRes = await fetch(`${BACKEND_URL}/api/signals/generate?timeframe=${currentTimeframe}`);
-      const signalPayload = await signalRes.json();
-      if (signalPayload && signalPayload.activeSignal) {
-        setActiveSignal(signalPayload.activeSignal);
-        setTechSummary(signalPayload.technicalSummary);
-        setSentimentSummary(signalPayload.sentimentSummary);
-        if (signalPayload.sessionProfiles) {
-          setSessionProfiles(signalPayload.sessionProfiles);
-        } else {
-          // Fallback if not returned
-          setSessionProfiles({
-            asian: { high: currentPriceVal + 4.5, low: currentPriceVal - 11.2, status: "Accumulation complete" },
-            london: { high: currentPriceVal + 9.8, low: currentPriceVal - 14.5, status: "Asian Sweep Hunt detected" },
-            newyork: { high: currentPriceVal + 13.6, low: currentPriceVal - 8.9, status: "Distribution phase active" }
-          });
-        }
-        setIsBackendOnline(true);
-        setIsAiEngineOnline(signalPayload.activeSignal.engineConnected);
-        setVolatility(signalPayload.technicalSummary.volatilityScore > 65 ? "High" : signalPayload.technicalSummary.volatilityScore > 35 ? "Medium" : "Low");
-      }
-    } catch (e) {
-      console.warn("Failed to fetch active signals:", e);
-      // Local offline fallback simulation using local helper
-      simulateLocalConfluence(currentPriceVal);
+      console.warn("Failed to poll intelligence state:", e);
       setIsBackendOnline(false);
       setIsAiEngineOnline(false);
     }
-    
     setLiveStatus("LIVE");
   };
 
-  const simulateLocalConfluence = (price: number) => {
-    // Generate simulated indicators
-    setTechSummary({
-      ema20: price - 3.5,
-      ema50: price - 8.2,
-      ema200: price - 24.10,
-      rsi: 58.4,
-      atr: 4.80,
-      macd: { macdLine: 0.24, signalLine: 0.18, histogram: 0.06 },
-      bb: { upper: price + 15.0, middle: price, lower: price - 15.0 },
-      trendScore: 75,
-      volatilityScore: 48,
-      bullishIndication: "Bullish Alignment (Offline Mode)"
-    });
+  // WebSocket Centralized State Sync with HTTP Fallback Polling
+  useEffect(() => {
+    let socket: WebSocket | null = null;
+    let fallbackInterval: NodeJS.Timeout | null = null;
+    let reconnectTimeout: NodeJS.Timeout | null = null;
 
-    setSentimentSummary({
-      sentiment_score: 45,
-      bias: "bullish",
-      impact_level: "Medium",
-      market_mood: "Risk-Off (Geopolitical Risk)"
-    });
+    const connectWS = () => {
+      const wsUrl = BACKEND_URL.replace(/^http/, 'ws');
+      console.log(`Connecting to WebSocket at ${wsUrl}`);
+      try {
+        socket = new WebSocket(wsUrl);
 
-    setSessionProfiles({
-      asian: { high: price + 4.5, low: price - 11.2, status: "Accumulation complete" },
-      london: { high: price + 9.8, low: price - 14.5, status: "Asian Sweep Hunt detected" },
-      newyork: { high: price + 13.6, low: price - 8.9, status: "Distribution phase active" }
-    });
+        socket.onopen = () => {
+          console.log("Aurax WebSocket Connected.");
+          setIsBackendOnline(true);
+          if (fallbackInterval) {
+            clearInterval(fallbackInterval);
+            fallbackInterval = null;
+          }
+        };
 
-    setActiveSignal({
-      id: "SIG_OFFLINE_XAU",
-      symbol: "XAUUSD",
-      direction: "BUY",
-      entry: price,
-      stopLoss: parseFloat((price - 12.0).toFixed(2)),
-      takeProfit1: parseFloat((price + 15.0).toFixed(2)),
-      takeProfit2: parseFloat((price + 28.0).toFixed(2)),
-      takeProfit3: parseFloat((price + 45.0).toFixed(2)),
-      riskRewardRatio: 2.33,
-      confidenceScore: 72,
-      riskLevel: "Medium",
-      confluences: [
-        { factor: "EMA Trend Alignment (Bullish)", weight: 20 },
-        { factor: "AI Trend Probability (Simulated)", weight: 20 },
-        { factor: "Macro News Sentiment (Bullish)", weight: 15 }
-      ],
-      smcLevels: {
-        fvgs: [{ type: "bullish", top: price * 1.002, bottom: price * 0.998, mitigated: false }],
-        order_blocks: [
-          { type: "bullish", top: price * 0.996, bottom: price * 0.992, strength: "High", mitigated: false },
-          { type: "bearish", top: price * 1.008, bottom: price * 1.004, strength: "High", mitigated: false }
-        ],
-        market_structure: [{ type: "bullish", structure: "BOS", price: price * 0.99, timestamp: new Date().toISOString() }],
-        liquidity_sweeps: [{ type: "bullish", price_swept: price * 0.995, timestamp: new Date().toISOString() }],
-        supply_demand_zones: [
-          { type: "demand", top: price * 0.995, bottom: price * 0.992, strength: "High" },
-          { type: "supply", top: price * 1.008, bottom: price * 1.005, strength: "High" }
-        ]
+        socket.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data);
+            if (message.type === 'marketState' && message.data) {
+              const state = message.data;
+              
+              setLivePrice((prev) => {
+                if (state.price > prev) setPriceDirection("up");
+                else if (state.price < prev) setPriceDirection("down");
+                else setPriceDirection("flat");
+                return state.price;
+              });
+              setSpread(state.spread);
+              setActiveSignal(state.activeSignal);
+              setTechSummary(state.technicalSummary);
+              setSentimentSummary(state.sentimentSummary);
+              setSessionProfiles(state.sessionProfiles);
+              setCorrelations(state.correlations);
+              setNewsList(state.newsList || []);
+              setLogs(state.logs || []);
+              setDataFreshness(state.dataFreshness || {});
+              setMarketRegime(state.marketRegime || "Neutral Consolidation");
+              
+              setIsBackendOnline(true);
+              setIsAiEngineOnline(state.activeSignal?.id ? true : false);
+              setVolatility(state.technicalSummary.volatilityScore > 65 ? "High" : state.technicalSummary.volatilityScore > 35 ? "Medium" : "Low");
+              setIsLoading(false);
+            }
+          } catch (e) {
+            console.error("WS message parse error:", e);
+          }
+        };
+
+        socket.onerror = (err) => {
+          console.warn("WebSocket Connection Error:", err);
+          startFallback();
+        };
+
+        socket.onclose = () => {
+          console.warn("WebSocket closed. Reconnecting in 5s...");
+          startFallback();
+          reconnectTimeout = setTimeout(connectWS, 5000);
+        };
+      } catch (err) {
+        console.error("WS setup failure:", err);
+        startFallback();
       }
-    });
-  };
-
-  // Main lifecycle update loops
-  useEffect(() => {
-    // Initial fetch sequences
-    fetchNews();
-    fetchCorrelation();
-    pollIntelligence(timeframe);
-
-    // Fast intelligence update loop (3.5s)
-    const intelInterval = setInterval(() => {
-      pollIntelligence(timeframe);
-    }, 3500);
-
-    return () => clearInterval(intelInterval);
-  }, [timeframe]);
-
-  // Slower background updates (90s for news, 5m for correlations)
-  useEffect(() => {
-    const newsInterval = setInterval(fetchNews, 90000);
-    const corrInterval = setInterval(fetchCorrelation, 300000);
-    return () => {
-      clearInterval(newsInterval);
-      clearInterval(corrInterval);
     };
-  }, []);
+
+    const startFallback = () => {
+      if (!fallbackInterval) {
+        console.log("WebSocket fallback polling activated.");
+        pollIntelligence(timeframe);
+        fallbackInterval = setInterval(() => {
+          pollIntelligence(timeframe);
+        }, 3000);
+      }
+    };
+
+    connectWS();
+
+    return () => {
+      if (socket) socket.close();
+      if (fallbackInterval) clearInterval(fallbackInterval);
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+    };
+  }, [timeframe]);
 
   // Countdown timer for 30-minute signal lock
   useEffect(() => {
@@ -334,8 +314,6 @@ export default function TerminalPage() {
   }, [activeSignal, timeframe]);
 
   const handleManualRefresh = () => {
-    fetchNews();
-    fetchCorrelation();
     pollIntelligence(timeframe);
   };
 
@@ -410,6 +388,10 @@ export default function TerminalPage() {
           <div className="h-3 w-px bg-gold-900/15 hidden sm:block" />
           <div className="hidden sm:block">
             VOLATILITY: <span className="text-gray-200">{volatility.toUpperCase()}</span>
+          </div>
+          <div className="h-3 w-px bg-gold-900/15 hidden md:block" />
+          <div className="hidden md:block">
+            REGIME: <span className="text-gold-500 font-bold uppercase">{marketRegime}</span>
           </div>
         </div>
         
@@ -552,8 +534,11 @@ export default function TerminalPage() {
             {/* Macro News Sentiment */}
             <div className="glass-panel rounded-lg p-4 flex flex-col justify-between">
               <div>
-                <h3 className="text-xs font-mono font-bold text-gray-200 flex items-center gap-2 mb-3">
-                  <MessageSquare className="w-3.5 h-3.5 text-gold-500" /> MACRO SENTIMENT METRIC
+                <h3 className="text-xs font-mono font-bold text-gray-200 flex items-center justify-between gap-2 mb-3">
+                  <span className="flex items-center gap-2">
+                    <MessageSquare className="w-3.5 h-3.5 text-gold-500" /> MACRO SENTIMENT METRIC
+                  </span>
+                  <span className="text-[9px] text-gray-500 font-normal uppercase">{dataFreshness.news || "Live now"}</span>
                 </h3>
                 
                 {sentimentSummary ? (
@@ -632,7 +617,12 @@ export default function TerminalPage() {
             {activeSignal ? (
               <div className="space-y-5">
                 <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-mono text-gold-600 uppercase font-black tracking-widest">ACTIVE TRADING SIGNAL</span>
+                  <span className="text-[10px] font-mono text-gold-600 uppercase font-black tracking-widest flex items-center gap-2">
+                    ACTIVE TRADING SIGNAL
+                    <span className="text-[9px] text-gray-500 font-normal uppercase normal-case ml-2 bg-obsidian-900 px-1.5 py-0.5 rounded border border-gold-900/10">
+                      {dataFreshness.signal || "Live now"}
+                    </span>
+                  </span>
                   <div className="flex items-center gap-1.5">
                     {timeRemaining && (
                       <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-gold-950/40 border border-gold-500/20 text-gold-500 font-black animate-pulse">
@@ -770,8 +760,11 @@ export default function TerminalPage() {
 
           {/* AI prediction meters */}
           <div className="glass-panel rounded-lg p-5 space-y-4 font-mono text-xs">
-            <h3 className="text-xs font-bold text-gray-200 flex items-center gap-2">
-              <Cpu className="w-3.5 h-3.5 text-gold-500" /> ENSEMBLE AI CONFIDENCE
+            <h3 className="text-xs font-bold text-gray-200 flex items-center justify-between gap-2">
+              <span className="flex items-center gap-2">
+                <Cpu className="w-3.5 h-3.5 text-gold-500" /> ENSEMBLE AI CONFIDENCE
+              </span>
+              <span className="text-[9px] text-gray-500 font-normal uppercase">{dataFreshness.ai || "Live now"}</span>
             </h3>
             
             {techSummary && activeSignal ? (
@@ -951,6 +944,47 @@ export default function TerminalPage() {
         </div>
 
       </div>
+
+      {/* Hidden system logs debug panel */}
+      {showDebugLogs && (
+        <div className="mx-6 mb-4 glass-panel border border-gold-900/20 bg-obsidian-950 p-4 rounded-lg font-mono text-[10px] text-gray-400">
+          <div className="flex justify-between items-center border-b border-gold-900/10 pb-2 mb-2">
+            <span className="text-gold-500 font-bold tracking-widest">SYSTEM CALCULATIONS LOGGER (DEBUG PANEL)</span>
+            <button 
+              onClick={() => setShowDebugLogs(false)} 
+              className="text-gray-500 hover:text-white transition-colors"
+            >
+              [CLOSE]
+            </button>
+          </div>
+          <div className="max-h-[150px] overflow-y-auto space-y-1 pr-1 font-bold">
+            {logs.length > 0 ? (
+              logs.map((log, i) => (
+                <div key={i} className="flex gap-2">
+                  <span className="text-gold-600">{log}</span>
+                </div>
+              ))
+            ) : (
+              <div className="text-gray-600">No logs generated. Connect WebSocket or trigger calculations.</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Footer */}
+      <footer className="border-t border-gold-900/10 py-4 px-6 flex justify-between items-center text-[10px] font-mono text-gray-500 bg-obsidian-950/40">
+        <div>
+          © {new Date().getFullYear()} AURAX CAPITAL INTELLIGENCE. ALL RIGHTS RESERVED.
+        </div>
+        <div 
+          onClick={() => setShowDebugLogs(!showDebugLogs)} 
+          className="cursor-pointer hover:text-gold-500 transition-colors flex items-center gap-1.5"
+          title="Click to reveal system debug logs"
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-gold-500/40 animate-pulse" />
+          SYSTEM VERSION: <span className="font-bold text-gold-600">v4.8.2-PROD</span>
+        </div>
+      </footer>
 
     </div>
   );

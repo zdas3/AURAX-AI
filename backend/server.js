@@ -1,6 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { createServer } from 'http';
+import { WebSocketServer } from 'ws';
+import { startMarketEngine, getMarketState } from './marketEngine.js';
 
 // Import route handlers
 import marketRouter from './routes/market.js';
@@ -12,6 +15,33 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const server = createServer(app);
+const wss = new WebSocketServer({ server });
+
+// WebSockets state broadcast orchestrator
+const clients = new Set();
+
+wss.on('connection', (ws) => {
+  clients.add(ws);
+  // Push live state instantly upon connection
+  ws.send(JSON.stringify({ type: 'marketState', data: getMarketState() }));
+
+  ws.on('close', () => {
+    clients.delete(ws);
+  });
+});
+
+const broadcastMarketState = (state) => {
+  const payload = JSON.stringify({ type: 'marketState', data: state });
+  for (const client of clients) {
+    if (client.readyState === 1) { // OPEN
+      client.send(payload);
+    }
+  }
+};
+
+// Start the Centralized Market Engine
+startMarketEngine(broadcastMarketState);
 
 // Shared in-memory caches for real-time synchronization and API rate limit protection
 app.locals.priceCache = { price: 4335.50, timestamp: Date.now() };
@@ -49,8 +79,8 @@ app.get('/health', (req, res) => {
 });
 
 // Start listening
-app.listen(PORT, () => {
-  console.log(`Aurax Backend Proxy running on port ${PORT}`);
+server.listen(PORT, () => {
+  console.log(`Aurax Centralized Server running on port ${PORT}`);
 });
 
 export default app;
