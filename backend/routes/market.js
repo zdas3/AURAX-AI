@@ -5,10 +5,18 @@ import dotenv from 'dotenv';
 dotenv.config();
 const router = express.Router();
 
-// Cache variables
-let priceCache = { price: 4335.50, timestamp: Date.now() };
-let candlesCache = {};
-let newsCache = { articles: [], timestamp: 0 };
+// Cache variables helper accessing app.locals for sharing
+const getCaches = (req) => {
+  if (!req.app.locals.priceCache) req.app.locals.priceCache = { price: 4335.50, timestamp: Date.now() };
+  if (!req.app.locals.candlesCache) req.app.locals.candlesCache = {};
+  if (!req.app.locals.newsCache) req.app.locals.newsCache = { articles: [], timestamp: 0 };
+  return {
+    priceCache: req.app.locals.priceCache,
+    candlesCache: req.app.locals.candlesCache,
+    newsCache: req.app.locals.newsCache
+  };
+};
+
 let correlationCache = { data: null, timestamp: 0 };
 
 // Helper to get environment API keys
@@ -59,9 +67,17 @@ const mockHeadlines = [
 // 1. Get Live Price
 router.get('/price', async (req, res) => {
   try {
-    // Check cache (throttle requests to Twelve Data to avoid limit issues)
-    if (Date.now() - priceCache.timestamp < 10000) { // 10 seconds cache
-      return res.json({ price: priceCache.price, timestamp: priceCache.timestamp, cached: true });
+    const { priceCache } = getCaches(req);
+    const CACHE_DURATION = 20000; // 20 seconds cache
+    const now = Date.now();
+
+    // If cache is fresh, return a simulated ticking price based on the base price
+    if (now - priceCache.timestamp < CACHE_DURATION && !priceCache.simulated) {
+      // Calculate a slight random drift based on elapsed time to make ticks look alive
+      const elapsedSeconds = (now - priceCache.timestamp) / 1000;
+      const walk = (Math.random() - 0.5) * 0.2 * elapsedSeconds;
+      const simulatedPrice = parseFloat((priceCache.price + walk).toFixed(2));
+      return res.json({ price: simulatedPrice, timestamp: now, cached: true });
     }
 
     try {
@@ -75,17 +91,19 @@ router.get('/price', async (req, res) => {
       
       if (response.data && response.data.price) {
         priceCache.price = parseFloat(response.data.price);
-        priceCache.timestamp = Date.now();
-        return res.json({ price: priceCache.price, timestamp: priceCache.timestamp, cached: false });
+        priceCache.timestamp = now;
+        priceCache.simulated = false;
+        return res.json({ price: priceCache.price, timestamp: now, cached: false });
       }
       
       throw new Error("Invalid response structure from Twelve Data");
     } catch (apiError) {
       // API failed or hit limits - perform tiny random walk on cached price to simulate live movement
-      const walk = (Math.random() - 0.5) * 0.15;
+      const walk = (Math.random() - 0.5) * 0.35;
       priceCache.price = parseFloat((priceCache.price + walk).toFixed(2));
-      priceCache.timestamp = Date.now();
-      return res.json({ price: priceCache.price, timestamp: priceCache.timestamp, simulated: true });
+      priceCache.timestamp = now;
+      priceCache.simulated = true;
+      return res.json({ price: priceCache.price, timestamp: now, simulated: true });
     }
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -98,12 +116,32 @@ router.get('/candles', async (req, res) => {
   const limit = parseInt(req.query.limit) || 100;
   
   try {
+    const { priceCache, candlesCache } = getCaches(req);
+    const now = Date.now();
     const cacheKey = `${timeframe}_${limit}`;
     const cachedData = candlesCache[cacheKey];
     
+    const currentPrice = priceCache.price;
+    
+    // Inline helper to sync the final candle with the live quote price
+    const returnUpdatedCandles = (candles) => {
+      if (candles && candles.length > 0) {
+        const updated = [...candles];
+        const lastIdx = updated.length - 1;
+        updated[lastIdx] = {
+          ...updated[lastIdx],
+          close: currentPrice,
+          high: Math.max(updated[lastIdx].high, currentPrice),
+          low: Math.min(updated[lastIdx].low, currentPrice)
+        };
+        return updated;
+      }
+      return candles;
+    };
+
     // Cache candles for 1 minute
-    if (cachedData && (Date.now() - cachedData.timestamp < 60000)) {
-      return res.json(cachedData.data);
+    if (cachedData && (now - cachedData.timestamp < 60000)) {
+      return res.json(returnUpdatedCandles(cachedData.data));
     }
 
     // Convert timeframe to Twelve Data interval format
@@ -139,17 +177,16 @@ router.get('/candles', async (req, res) => {
           volume: parseFloat(val.volume || 1000)
         })).reverse(); // Twelve data returns newest first, we want oldest first
         
-        candlesCache[cacheKey] = { data: candles, timestamp: Date.now() };
-        return res.json(candles);
+        candlesCache[cacheKey] = { data: candles, timestamp: now };
+        return res.json(returnUpdatedCandles(candles));
       }
       
       throw new Error(response.data.status === 'error' ? response.data.message : 'Invalid values');
     } catch (apiError) {
       // Fallback to high-fidelity mock candles
-      const basePrice = priceCache.price;
-      const mockCandles = generateMockCandles(limit, basePrice);
-      candlesCache[cacheKey] = { data: mockCandles, timestamp: Date.now() };
-      return res.json(mockCandles);
+      const mockCandles = generateMockCandles(limit, currentPrice);
+      candlesCache[cacheKey] = { data: mockCandles, timestamp: now };
+      return res.json(returnUpdatedCandles(mockCandles));
     }
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -159,8 +196,11 @@ router.get('/candles', async (req, res) => {
 // 3. Get News & Sentiment Headlines
 router.get('/news', async (req, res) => {
   try {
-    // Cache news for 30 minutes
-    if (Date.now() - newsCache.timestamp < 1800000 && newsCache.articles.length > 0) {
+    const { newsCache } = getCaches(req);
+    const now = Date.now();
+    
+    // Cache news for 2 minutes to fulfill the frequent polling request
+    if (now - newsCache.timestamp < 120000 && newsCache.articles.length > 0) {
       return res.json(newsCache.articles);
     }
 
@@ -212,7 +252,8 @@ router.get('/news', async (req, res) => {
       }
 
       if (articles.length > 0) {
-        newsCache = { articles, timestamp: Date.now() };
+        newsCache.articles = articles;
+        newsCache.timestamp = now;
         return res.json(articles);
       }
       
@@ -221,10 +262,11 @@ router.get('/news', async (req, res) => {
       // Fallback to realistic mock headlines
       const mockArticles = mockHeadlines.map((hl, idx) => ({
         ...hl,
-        publishedAt: new Date(Date.now() - idx * 3600000).toISOString(),
+        publishedAt: new Date(now - idx * 3600000).toISOString(),
         url: "#"
       }));
-      newsCache = { articles: mockArticles, timestamp: Date.now() };
+      newsCache.articles = mockArticles;
+      newsCache.timestamp = now;
       return res.json(mockArticles);
     }
   } catch (error) {

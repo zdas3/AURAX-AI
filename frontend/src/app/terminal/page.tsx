@@ -25,6 +25,16 @@ interface Signal {
   confidenceScore: number;
   riskLevel: string;
   confluences: { factor: string; weight: number }[];
+  engineConnected?: boolean;
+  smcLevels?: {
+    fvgs: any[];
+    order_blocks: any[];
+    market_structure: any[];
+    liquidity_sweeps: any[];
+    supply_demand_zones: any[];
+  };
+  technicalIndicators?: any;
+  aiPredictions?: any;
 }
 
 export default function TerminalPage() {
@@ -103,75 +113,88 @@ export default function TerminalPage() {
     }
   };
 
-  // 2. Fetch Terminal Data from Backend or fall back to high-fidelity mocks
-  const fetchTerminalData = async () => {
-    setIsLoading(true);
+  // Intelligence Polling Status
+  const [liveStatus, setLiveStatus] = useState<"LIVE" | "UPDATING" | "AI ANALYZING" | "OFFLINE">("LIVE");
+
+  // Fetch News and Sentiment (Slower Loop - every 90 seconds)
+  const fetchNews = async () => {
     try {
-      // Step A: Fetch News
-      let newsData = [];
-      try {
-        const newsRes = await fetch(`${BACKEND_URL}/api/market/news`);
-        newsData = await newsRes.json();
-        setNewsList(newsData);
-      } catch (e) {
-        // News fallback
-        newsData = [
-          { title: "FOMC statement hints at rate pause as inflation cools down", description: "Geopolitical Safe Haven demand remains robust.", source: "Reuters", publishedAt: new Date().toISOString() },
-          { title: "Middle East geopolitical conflicts trigger safe-haven gold buy-ins", description: "Market volatility peaks as gold approaches resistance.", source: "Bloomberg", publishedAt: new Date().toISOString() },
-          { title: "US Dollar Index DXY drops below critical support line", description: "Bond yields slip, strengthening gold commodity pricing.", source: "MarketWatch", publishedAt: new Date().toISOString() }
-        ];
+      const newsRes = await fetch(`${BACKEND_URL}/api/market/news`);
+      const newsData = await newsRes.json();
+      if (Array.isArray(newsData)) {
         setNewsList(newsData);
       }
+    } catch (e) {
+      console.warn("Failed to fetch news:", e);
+    }
+  };
 
-      // Step B: Fetch historical mock candles locally (or generate)
-      const basePrice = livePrice;
-      const candles = Array.from({ length: 60 }).map((_, idx) => {
-        const cVal = basePrice + (Math.random() - 0.5) * 15;
-        return {
-          timestamp: new Date(Date.now() - idx * 15 * 60 * 1000).toISOString(),
-          open: cVal - (Math.random() - 0.5) * 4,
-          high: cVal + Math.random() * 5,
-          low: cVal - Math.random() * 5,
-          close: cVal,
-          volume: Math.floor(1000 + Math.random() * 3000)
-        };
-      }).reverse();
+  // Fetch Correlation
+  const fetchCorrelation = async () => {
+    try {
+      const corrRes = await fetch(`${BACKEND_URL}/api/market/correlation`);
+      const corrData = await corrRes.json();
+      if (corrData && corrData.correlations) {
+        setCorrelations(corrData.correlations);
+      }
+    } catch (e) {
+      setCorrelations({ "DXY": -0.83, "US10Y": -0.76, "SPX500": 0.05, "CrudeOil": 0.54 });
+    }
+  };
 
-      // Step C: Trigger Signal Confluence Generation
-      try {
-        const signalRes = await fetch(`${BACKEND_URL}/api/signals/generate`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ candles, news: newsData })
+  // Fetch Price & Signals (Fast Loop - every 3.5 seconds)
+  const pollIntelligence = async (currentTimeframe: string) => {
+    setLiveStatus("UPDATING");
+    let currentPriceVal = livePrice;
+    
+    // Fetch latest price
+    try {
+      const priceRes = await fetch(`${BACKEND_URL}/api/market/price`);
+      const priceData = await priceRes.json();
+      if (priceData && priceData.price) {
+        setLivePrice((prev) => {
+          if (priceData.price > prev) setPriceDirection("up");
+          else if (priceData.price < prev) setPriceDirection("down");
+          else setPriceDirection("flat");
+          return priceData.price;
         });
-        
-        const signalPayload = await signalRes.json();
+        currentPriceVal = priceData.price;
+        setSpread(parseFloat((1.0 + Math.random() * 0.4).toFixed(1)));
+        setIsBackendOnline(true);
+      }
+    } catch (e) {
+      console.warn("Failed to fetch live price:", e);
+      // Offline simulated price movement
+      setLivePrice((prev) => {
+        const walk = (Math.random() - 0.5) * 0.35;
+        setPriceDirection(walk > 0 ? "up" : walk < 0 ? "down" : "flat");
+        return parseFloat((prev + walk).toFixed(2));
+      });
+    }
+
+    setLiveStatus("AI ANALYZING");
+
+    // Fetch latest signals & technical indicators
+    try {
+      const signalRes = await fetch(`${BACKEND_URL}/api/signals/generate?timeframe=${currentTimeframe}`);
+      const signalPayload = await signalRes.json();
+      if (signalPayload && signalPayload.activeSignal) {
         setActiveSignal(signalPayload.activeSignal);
         setTechSummary(signalPayload.technicalSummary);
         setSentimentSummary(signalPayload.sentimentSummary);
         setIsBackendOnline(true);
         setIsAiEngineOnline(signalPayload.activeSignal.engineConnected);
-      } catch (e) {
-        // Fallback calculations locally
-        setIsBackendOnline(false);
-        setIsAiEngineOnline(false);
-        simulateLocalConfluence(basePrice);
+        setVolatility(signalPayload.technicalSummary.volatilityScore > 65 ? "High" : signalPayload.technicalSummary.volatilityScore > 35 ? "Medium" : "Low");
       }
-
-      // Step D: Get Correlation
-      try {
-        const corrRes = await fetch(`${BACKEND_URL}/api/market/correlation`);
-        const corrData = await corrRes.json();
-        setCorrelations(corrData.correlations);
-      } catch (e) {
-        setCorrelations({ "DXY": -0.83, "US10Y": -0.76, "SPX500": 0.05, "CrudeOil": 0.54 });
-      }
-
-    } catch (err) {
-      console.error("Error fetching terminal data:", err);
-    } finally {
-      setIsLoading(false);
+    } catch (e) {
+      console.warn("Failed to fetch active signals:", e);
+      // Local offline fallback simulation using local helper
+      simulateLocalConfluence(currentPriceVal);
+      setIsBackendOnline(false);
+      setIsAiEngineOnline(false);
     }
+    
+    setLiveStatus("LIVE");
   };
 
   const simulateLocalConfluence = (price: number) => {
@@ -182,6 +205,8 @@ export default function TerminalPage() {
       ema200: price - 24.10,
       rsi: 58.4,
       atr: 4.80,
+      macd: { macdLine: 0.24, signalLine: 0.18, histogram: 0.06 },
+      bb: { upper: price + 15.0, middle: price, lower: price - 15.0 },
       trendScore: 75,
       volatilityScore: 48,
       bullishIndication: "Bullish Alignment (Offline Mode)"
@@ -210,24 +235,53 @@ export default function TerminalPage() {
         { factor: "EMA Trend Alignment (Bullish)", weight: 20 },
         { factor: "AI Trend Probability (Simulated)", weight: 20 },
         { factor: "Macro News Sentiment (Bullish)", weight: 15 }
-      ]
+      ],
+      smcLevels: {
+        fvgs: [{ type: "bullish", top: price * 1.002, bottom: price * 0.998, mitigated: false }],
+        order_blocks: [
+          { type: "bullish", top: price * 0.996, bottom: price * 0.992, strength: "High", mitigated: false },
+          { type: "bearish", top: price * 1.008, bottom: price * 1.004, strength: "High", mitigated: false }
+        ],
+        market_structure: [{ type: "bullish", structure: "BOS", price: price * 0.99, timestamp: new Date().toISOString() }],
+        liquidity_sweeps: [{ type: "bullish", price_swept: price * 0.995, timestamp: new Date().toISOString() }],
+        supply_demand_zones: [
+          { type: "demand", top: price * 0.995, bottom: price * 0.992, strength: "High" },
+          { type: "supply", top: price * 1.008, bottom: price * 1.005, strength: "High" }
+        ]
+      }
     });
   };
 
+  // Main lifecycle update loops
   useEffect(() => {
-    fetchTerminalData();
-    // Poll for ticking updates
-    const priceInterval = setInterval(() => {
-      setLivePrice((prev) => {
-        const walk = (Math.random() - 0.5) * 0.35;
-        setPriceDirection(walk > 0 ? "up" : walk < 0 ? "down" : "flat");
-        return parseFloat((prev + walk).toFixed(2));
-      });
-      setSpread(parseFloat((1.0 + Math.random() * 0.4).toFixed(1)));
-    }, 4000);
+    // Initial fetch sequences
+    fetchNews();
+    fetchCorrelation();
+    pollIntelligence(timeframe);
 
-    return () => clearInterval(priceInterval);
+    // Fast intelligence update loop (3.5s)
+    const intelInterval = setInterval(() => {
+      pollIntelligence(timeframe);
+    }, 3500);
+
+    return () => clearInterval(intelInterval);
+  }, [timeframe]);
+
+  // Slower background updates (90s for news, 5m for correlations)
+  useEffect(() => {
+    const newsInterval = setInterval(fetchNews, 90000);
+    const corrInterval = setInterval(fetchCorrelation, 300000);
+    return () => {
+      clearInterval(newsInterval);
+      clearInterval(corrInterval);
+    };
   }, []);
+
+  const handleManualRefresh = () => {
+    fetchNews();
+    fetchCorrelation();
+    pollIntelligence(timeframe);
+  };
 
   // Timeframe selector handling
   const handleTimeframeChange = (tf: string) => {
@@ -339,11 +393,30 @@ export default function TerminalPage() {
             <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-obsidian-800 border border-gold-900/10 text-gray-300">
               Spread: {spread} pips
             </span>
+            
+            {/* Live Status indicator */}
+            <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[9px] font-mono font-bold tracking-widest border transition-all ${
+              liveStatus === "LIVE" 
+                ? "bg-emerald-950/30 border-emerald-500/20 text-emerald-400" 
+                : liveStatus === "UPDATING" 
+                ? "bg-amber-950/30 border-amber-500/20 text-amber-400 animate-pulse" 
+                : liveStatus === "AI ANALYZING"
+                ? "bg-gold-950/30 border-gold-500/20 text-gold-400"
+                : "bg-red-950/30 border-red-500/20 text-red-400"
+            }`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${
+                liveStatus === "LIVE" ? "bg-emerald-400 animate-pulse" :
+                liveStatus === "UPDATING" ? "bg-amber-400" :
+                liveStatus === "AI ANALYZING" ? "bg-gold-400 animate-ping" :
+                "bg-red-400"
+              }`} />
+              <span>{liveStatus}</span>
+            </div>
           </div>
         </div>
 
         <nav className="flex items-center gap-4 text-xs font-mono">
-          <button onClick={fetchTerminalData} className="p-2 rounded hover:bg-obsidian-900 border border-transparent hover:border-gold-900/10 text-gray-400 hover:text-gold-500 transition-all">
+          <button onClick={handleManualRefresh} className="p-2 rounded hover:bg-obsidian-900 border border-transparent hover:border-gold-900/10 text-gray-400 hover:text-gold-500 transition-all">
             <RefreshCw className="w-4 h-4" />
           </button>
           <Link href="/dashboard" className="text-gray-400 hover:text-gold-500 transition-colors">Dashboard</Link>
@@ -623,31 +696,100 @@ export default function TerminalPage() {
                 <div className="flex justify-between items-center border-b border-gold-900/5 pb-2">
                   <span className="text-gray-400">LSTM Recurrent Weight:</span>
                   <span className="text-gold-500 font-bold">
-                    {activeSignal.direction === 'BUY' ? '76.2% Bullish' : activeSignal.direction === 'SELL' ? '74.1% Bearish' : 'Neutral'}
+                    {activeSignal.aiPredictions 
+                      ? `${(activeSignal.aiPredictions.bullish_prob * 100).toFixed(1)}% Bullish` 
+                      : (activeSignal.direction === 'BUY' ? '76.2% Bullish' : activeSignal.direction === 'SELL' ? '74.1% Bearish' : 'Neutral')}
                   </span>
                 </div>
                 
                 <div className="flex justify-between items-center border-b border-gold-900/5 pb-2">
                   <span className="text-gray-400">XGBoost Classifier:</span>
                   <span className="text-gray-200 font-bold">
-                    {activeSignal.direction === 'BUY' ? '81.4% Bullish' : activeSignal.direction === 'SELL' ? '78.5% Bearish' : 'Neutral'}
+                    {activeSignal.aiPredictions 
+                      ? `${(Math.max(activeSignal.aiPredictions.bullish_prob, activeSignal.aiPredictions.bearish_prob) * 100).toFixed(1)}% Confidence` 
+                      : (activeSignal.direction === 'BUY' ? '81.4% Bullish' : activeSignal.direction === 'SELL' ? '78.5% Bearish' : 'Neutral')}
                   </span>
                 </div>
 
                 <div className="flex justify-between items-center border-b border-gold-900/5 pb-2">
-                  <span className="text-gray-400">Random Forest:</span>
+                  <span className="text-gray-400">Random Forest Weight:</span>
                   <span className="text-gray-200 font-bold">
-                    {activeSignal.direction === 'BUY' ? '68.9% Bullish' : activeSignal.direction === 'SELL' ? '65.2% Bearish' : 'Neutral'}
+                    {activeSignal.aiPredictions 
+                      ? `${(activeSignal.aiPredictions.trend_continuation_prob * 100).toFixed(1)}% Continuity` 
+                      : (activeSignal.direction === 'BUY' ? '68.9% Bullish' : activeSignal.direction === 'SELL' ? '65.2% Bearish' : 'Neutral')}
                   </span>
                 </div>
                 
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-400">Trend Continuation:</span>
-                  <span className="text-emerald-500 font-bold uppercase">72.4% Probability</span>
+                  <span className="text-gray-400">Confidence Score:</span>
+                  <span className="text-emerald-500 font-bold uppercase">{activeSignal.confidenceScore}% Probability</span>
                 </div>
               </div>
             ) : (
               <div className="text-center text-gray-500 py-10">Running ML calculations...</div>
+            )}
+          </div>
+
+          {/* Technical Indicators Panel */}
+          <div className="glass-panel rounded-lg p-5 space-y-4 font-mono text-xs">
+            <h3 className="text-xs font-bold text-gray-200 flex items-center gap-2">
+              <Activity className="w-3.5 h-3.5 text-gold-500" /> REAL-TIME INDICATORS
+            </h3>
+            
+            {techSummary ? (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="border border-gold-900/10 bg-obsidian-900/40 p-2.5 rounded">
+                  <div className="text-[10px] text-gray-400 uppercase">RSI (14)</div>
+                  <div className="text-sm font-bold text-white mt-0.5">{techSummary.rsi?.toFixed(2)}</div>
+                  <div className={`text-[9px] mt-0.5 font-bold ${techSummary.rsi > 70 ? 'text-red-400' : techSummary.rsi < 30 ? 'text-emerald-400' : 'text-gray-500'}`}>
+                    {techSummary.rsi > 70 ? 'OVERBOUGHT' : techSummary.rsi < 30 ? 'OVERSOLD' : 'NEUTRAL'}
+                  </div>
+                </div>
+
+                <div className="border border-gold-900/10 bg-obsidian-900/40 p-2.5 rounded">
+                  <div className="text-[10px] text-gray-400 uppercase">MACD</div>
+                  <div className="text-xs font-bold text-white mt-0.5">
+                    {techSummary.macd ? `${techSummary.macd.macdLine?.toFixed(2)} / ${techSummary.macd.signalLine?.toFixed(2)}` : '0.00 / 0.00'}
+                  </div>
+                  <div className={`text-[9px] mt-0.5 font-bold ${techSummary.macd?.histogram > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    HIST: {techSummary.macd?.histogram > 0 ? '+' : ''}{techSummary.macd?.histogram?.toFixed(2) || '0.00'}
+                  </div>
+                </div>
+
+                <div className="border border-gold-900/10 bg-obsidian-900/40 p-2.5 rounded">
+                  <div className="text-[10px] text-gray-400 uppercase">EMA (20/50/200)</div>
+                  <div className="text-[10px] font-bold text-gray-200 mt-0.5">
+                    EMA20: ${techSummary.ema20?.toFixed(1)}
+                  </div>
+                  <div className="text-[9px] text-gray-500">
+                    50: ${techSummary.ema50?.toFixed(1)} | 200: ${techSummary.ema200?.toFixed(1)}
+                  </div>
+                </div>
+
+                <div className="border border-gold-900/10 bg-obsidian-900/40 p-2.5 rounded">
+                  <div className="text-[10px] text-gray-400 uppercase">BOLLINGER BANDS</div>
+                  <div className="text-[10px] font-bold text-gray-200 mt-0.5">
+                    MID: ${techSummary.bb?.middle?.toFixed(1) || '0.00'}
+                  </div>
+                  <div className="text-[9px] text-gray-500">
+                    UP: ${techSummary.bb?.upper?.toFixed(1) || '0.00'} | LW: ${techSummary.bb?.lower?.toFixed(1) || '0.00'}
+                  </div>
+                </div>
+
+                <div className="border border-gold-900/10 bg-obsidian-900/40 p-2.5 rounded">
+                  <div className="text-[10px] text-gray-400 uppercase">ATR (14)</div>
+                  <div className="text-sm font-bold text-white mt-0.5">${techSummary.atr?.toFixed(2)}</div>
+                  <div className="text-[9px] text-gray-500">VOLATILITY RANGE</div>
+                </div>
+
+                <div className="border border-gold-900/10 bg-obsidian-900/40 p-2.5 rounded">
+                  <div className="text-[10px] text-gray-400 uppercase">TREND CONFLUENCE</div>
+                  <div className="text-sm font-bold text-white mt-0.5">{techSummary.trendScore}%</div>
+                  <div className="text-[9px] text-gold-500 uppercase font-bold">{techSummary.bullishIndication?.split(' ')[0]}</div>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center text-gray-500 py-10">Running indicator scans...</div>
             )}
           </div>
 
@@ -657,33 +799,69 @@ export default function TerminalPage() {
               <Layers className="w-3.5 h-3.5 text-gold-500" /> DETECTED ALGORITHMIC LEVELS
             </h3>
 
-            <div className="space-y-3 max-h-[220px] overflow-y-auto pr-1">
-              <div className="p-2 border border-gold-900/10 bg-obsidian-900/40 rounded flex flex-col gap-1">
-                <div className="flex justify-between text-[10px]">
-                  <span className="text-emerald-500 font-bold">BULLISH ORDER BLOCK</span>
-                  <span className="text-gray-500">1H Frame</span>
-                </div>
-                <div className="text-xs text-gray-300 font-bold">$4322.50 - $4327.10</div>
-                <div className="text-[9px] text-gray-500">Unmitigated block volume | Strength: High</div>
-              </div>
+            <div className="space-y-3 max-h-[250px] overflow-y-auto pr-1">
+              {activeSignal && activeSignal.smcLevels ? (
+                <>
+                  {/* Render Order Blocks */}
+                  {activeSignal.smcLevels.order_blocks?.slice(0, 2).map((ob: any, idx: number) => (
+                    <div key={`ob-${idx}`} className="p-2 border border-gold-900/10 bg-obsidian-900/40 rounded flex flex-col gap-1">
+                      <div className="flex justify-between text-[10px]">
+                        <span className={`${ob.type === "bullish" ? "text-emerald-500" : "text-red-400"} font-bold`}>
+                          {ob.type === "bullish" ? "BULLISH ORDER BLOCK" : "BEARISH ORDER BLOCK"}
+                        </span>
+                        <span className="text-gray-500">{timeframe} Frame</span>
+                      </div>
+                      <div className="text-xs text-gray-300 font-bold">
+                        ${ob.bottom?.toFixed(2)} - ${ob.top?.toFixed(2)}
+                      </div>
+                      <div className="text-[9px] text-gray-500">
+                        {ob.mitigated ? "Mitigated block" : "Unmitigated block volume"} | Strength: {ob.strength || "High"}
+                      </div>
+                    </div>
+                  ))}
 
-              <div className="p-2 border border-gold-900/10 bg-obsidian-900/40 rounded flex flex-col gap-1">
-                <div className="flex justify-between text-[10px]">
-                  <span className="text-emerald-500 font-bold">FAIR VALUE GAP (FVG)</span>
-                  <span className="text-gray-500">15m Frame</span>
-                </div>
-                <div className="text-xs text-gray-300 font-bold">$4332.10 - $4334.80</div>
-                <div className="text-[9px] text-gray-500">Imbalance zone | Mitigated: Partially</div>
-              </div>
+                  {/* Render FVGs */}
+                  {activeSignal.smcLevels.fvgs?.slice(0, 2).map((fvg: any, idx: number) => (
+                    <div key={`fvg-${idx}`} className="p-2 border border-gold-900/10 bg-obsidian-900/40 rounded flex flex-col gap-1">
+                      <div className="flex justify-between text-[10px]">
+                        <span className={`${fvg.type === "bullish" ? "text-emerald-500" : "text-red-400"} font-bold`}>
+                          {fvg.type === "bullish" ? "BULLISH FVG (IMBALANCE)" : "BEARISH FVG (IMBALANCE)"}
+                        </span>
+                        <span className="text-gray-500">{timeframe} Frame</span>
+                      </div>
+                      <div className="text-xs text-gray-300 font-bold">
+                        ${fvg.bottom?.toFixed(2)} - ${fvg.top?.toFixed(2)}
+                      </div>
+                      <div className="text-[9px] text-gray-500">
+                        Imbalance zone | Status: {fvg.mitigated ? "Mitigated" : "Active"}
+                      </div>
+                    </div>
+                  ))}
 
-              <div className="p-2 border border-gold-900/10 bg-obsidian-900/40 rounded flex flex-col gap-1">
-                <div className="flex justify-between text-[10px]">
-                  <span className="text-red-400 font-bold">LIQUIDITY SWEEP (BSL)</span>
-                  <span className="text-gray-500">5m Frame</span>
-                </div>
-                <div className="text-xs text-gray-300 font-bold">$4344.80 Swept</div>
-                <div className="text-[9px] text-gray-500">Rejection wick | Liquidity hunt complete</div>
-              </div>
+                  {/* Render Liquidity Sweeps */}
+                  {activeSignal.smcLevels.liquidity_sweeps?.slice(0, 1).map((sweep: any, idx: number) => (
+                    <div key={`sweep-${idx}`} className="p-2 border border-gold-900/10 bg-obsidian-900/40 rounded flex flex-col gap-1">
+                      <div className="flex justify-between text-[10px]">
+                        <span className="text-amber-500 font-bold">LIQUIDITY SWEEP DETECTED</span>
+                        <span className="text-gray-500">Recent Hunt</span>
+                      </div>
+                      <div className="text-xs text-gray-300 font-bold">
+                        ${sweep.price_swept?.toFixed(2)} Swept
+                      </div>
+                      <div className="text-[9px] text-gray-500">
+                        {sweep.type === "bullish" ? "Sell Side Liquidity (SSL) Hunt" : "Buy Side Liquidity (BSL) Hunt"} complete
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Fallback if no levels present */}
+                  {(!activeSignal.smcLevels.order_blocks?.length && !activeSignal.smcLevels.fvgs?.length) && (
+                    <div className="text-center text-gray-500 py-4">Scanning structure...</div>
+                  )}
+                </>
+              ) : (
+                <div className="text-center text-gray-500 py-4">Loading structure maps...</div>
+              )}
             </div>
           </div>
 

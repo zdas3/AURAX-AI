@@ -13,6 +13,11 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Shared in-memory caches for real-time synchronization and API rate limit protection
+app.locals.priceCache = { price: 4335.50, timestamp: Date.now() };
+app.locals.candlesCache = {};
+app.locals.newsCache = { articles: [], timestamp: 0 };
+
 // Enable CORS for frontend requests
 app.use(cors({
   origin: '*',
