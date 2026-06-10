@@ -35,8 +35,53 @@ const getCandlesHelper = (req, timeframe = '15m', limit = 60) => {
     return candles;
   };
 
+  const now = Date.now();
   if (cachedData) {
-    return returnUpdatedCandles(cachedData.data);
+    const elapsed = now - cachedData.timestamp;
+    if (elapsed < 60000) {
+      return returnUpdatedCandles(cachedData.data);
+    }
+    
+    // Slide window: generate matching newer candles for elapsed time
+    const candles = [...cachedData.data];
+    const intervals = {
+      '1m': 60000,
+      '5m': 300000,
+      '15m': 900000,
+      '1H': 3600000,
+      '4H': 14400000,
+      'Daily': 86400000
+    };
+    const intervalMs = intervals[timeframe] || 900000;
+    
+    // Only slide if at least one interval has passed
+    const passedIntervals = Math.floor(elapsed / intervalMs);
+    if (passedIntervals > 0) {
+      for (let s = 0; s < Math.min(passedIntervals, candles.length); s++) {
+        candles.shift();
+        const lastCandle = candles[candles.length - 1];
+        const lastClose = lastCandle ? lastCandle.close : currentPrice;
+        
+        const open = lastClose;
+        const close = open + (Math.random() - 0.49) * 3;
+        const high = Math.max(open, close) + Math.random() * 1.5;
+        const low = Math.min(open, close) - Math.random() * 1.5;
+        const volume = Math.floor(1000 + Math.random() * 4000);
+        
+        const candleTime = new Date(cachedData.timestamp + (s + 1) * intervalMs);
+        
+        candles.push({
+          timestamp: candleTime.toISOString(),
+          open: parseFloat(open.toFixed(2)),
+          high: parseFloat(high.toFixed(2)),
+          low: parseFloat(low.toFixed(2)),
+          close: parseFloat(close.toFixed(2)),
+          volume: volume
+        });
+      }
+      candlesCache[cacheKey] = { data: candles, timestamp: now };
+    }
+    return returnUpdatedCandles(candles);
   }
   
   // Fallback: Generate mock candles
