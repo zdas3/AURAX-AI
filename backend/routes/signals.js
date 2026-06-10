@@ -453,44 +453,22 @@ router.all('/generate', async (req, res) => {
       }
     }
 
-    // 4. Determine Signal (BUY / SELL / HOLD)
+    // 4. Determine Signal (BUY / SELL / HOLD) - High-Confluence Thresholds
     let direction = "HOLD";
     let confidencePercent = 50;
     
-    if (score >= 68) {
+    if (score >= 72) {
       direction = "BUY";
-      confidencePercent = Math.min(96, score);
-    } else if (score <= 32) {
+      confidencePercent = Math.min(98, score);
+    } else if (score <= 28) {
       direction = "SELL";
-      confidencePercent = Math.min(96, 100 - score);
+      confidencePercent = Math.min(98, 100 - score);
     } else {
       direction = "HOLD";
       confidencePercent = Math.round(50 + Math.abs(50 - score));
     }
 
-    // Force a new signal direction (BUY or SELL) at least every 30 minutes
-    const now = Date.now();
-    if (!req.app.locals.lastSignalTime) {
-      req.app.locals.lastSignalTime = now;
-    }
-
-    if (direction !== "HOLD") {
-      req.app.locals.lastSignalTime = now;
-      req.app.locals.forcedDirection = null;
-    } else {
-      if (now - req.app.locals.lastSignalTime >= 1800000) {
-        const forcedDir = Math.random() > 0.5 ? "BUY" : "SELL";
-        direction = forcedDir;
-        confidencePercent = Math.floor(75 + Math.random() * 18);
-        req.app.locals.forcedDirection = forcedDir;
-        req.app.locals.lastSignalTime = now;
-      } else if (req.app.locals.forcedDirection) {
-        direction = req.app.locals.forcedDirection;
-        confidencePercent = Math.floor(75 + Math.random() * 18);
-      }
-    }
-
-    // 5. Generate Target Levels (Entry, SL, TPs)
+    // 5. Generate Target Levels (Entry, SL, TPs) - Optimized Risk/Reward (min 2.5x RR on TP2)
     let entry = currentPrice;
     let sl = 0;
     let tp1 = 0;
@@ -498,29 +476,29 @@ router.all('/generate', async (req, res) => {
     let tp3 = 0;
     let rrRatio = 0;
     
-    const atrFactor = Math.max(1.5, tech.atr);
+    const atrFactor = Math.max(1.2, tech.atr);
 
     if (direction === "BUY") {
       entry = parseFloat(currentPrice.toFixed(2));
       const demandZone = smc.supply_demand_zones.find(z => z.type === "demand");
-      const slLevel = demandZone ? demandZone.bottom : currentPrice - (atrFactor * 2.0);
-      sl = parseFloat(Math.min(currentPrice - 2.0, slLevel).toFixed(2));
+      const slLevel = demandZone ? demandZone.bottom : currentPrice - (atrFactor * 1.5);
+      sl = parseFloat(Math.min(currentPrice - 1.5, slLevel).toFixed(2));
       
       const risk = entry - sl;
-      tp1 = parseFloat((entry + risk * 1.2).toFixed(2));
-      tp2 = parseFloat((entry + risk * 2.0).toFixed(2));
-      tp3 = parseFloat((entry + risk * 3.5).toFixed(2));
+      tp1 = parseFloat((entry + risk * 1.5).toFixed(2));
+      tp2 = parseFloat((entry + risk * 2.5).toFixed(2));
+      tp3 = parseFloat((entry + risk * 4.0).toFixed(2));
       rrRatio = parseFloat(( (tp2 - entry) / (entry - sl) ).toFixed(2));
     } else if (direction === "SELL") {
       entry = parseFloat(currentPrice.toFixed(2));
       const supplyZone = smc.supply_demand_zones.find(z => z.type === "supply");
-      const slLevel = supplyZone ? supplyZone.top : currentPrice + (atrFactor * 2.0);
-      sl = parseFloat(Math.max(currentPrice + 2.0, slLevel).toFixed(2));
+      const slLevel = supplyZone ? supplyZone.top : currentPrice + (atrFactor * 1.5);
+      sl = parseFloat(Math.max(currentPrice + 1.5, slLevel).toFixed(2));
       
       const risk = sl - entry;
-      tp1 = parseFloat((entry - risk * 1.2).toFixed(2));
-      tp2 = parseFloat((entry - risk * 2.0).toFixed(2));
-      tp3 = parseFloat((entry - risk * 3.5).toFixed(2));
+      tp1 = parseFloat((entry - risk * 1.5).toFixed(2));
+      tp2 = parseFloat((entry - risk * 2.5).toFixed(2));
+      tp3 = parseFloat((entry - risk * 4.0).toFixed(2));
       rrRatio = parseFloat(( (entry - tp2) / (sl - entry) ).toFixed(2));
     }
 

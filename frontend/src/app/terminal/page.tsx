@@ -410,25 +410,6 @@ export default function TerminalPage() {
             <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-obsidian-800 border border-gold-900/10 text-gray-300">
               Spread: {spread} pips
             </span>
-            
-            {/* Live Status indicator */}
-            <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-[9px] font-mono font-bold tracking-widest border transition-all ${
-              liveStatus === "LIVE" 
-                ? "bg-emerald-950/30 border-emerald-500/20 text-emerald-400" 
-                : liveStatus === "UPDATING" 
-                ? "bg-amber-950/30 border-amber-500/20 text-amber-400 animate-pulse" 
-                : liveStatus === "AI ANALYZING"
-                ? "bg-gold-950/30 border-gold-500/20 text-gold-400"
-                : "bg-red-950/30 border-red-500/20 text-red-400"
-            }`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${
-                liveStatus === "LIVE" ? "bg-emerald-400 animate-pulse" :
-                liveStatus === "UPDATING" ? "bg-amber-400" :
-                liveStatus === "AI ANALYZING" ? "bg-gold-400 animate-ping" :
-                "bg-red-400"
-              }`} />
-              <span>{liveStatus}</span>
-            </div>
           </div>
         </div>
 
