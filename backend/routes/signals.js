@@ -468,28 +468,12 @@ router.all('/generate', async (req, res) => {
         }
       }
 
-      // 4. Determine Signal (BUY / SELL / HOLD) - High-Confluence Thresholds
-      let direction = "HOLD";
-      let confidencePercent = 50;
-      
-      if (score >= 72) {
-        direction = "BUY";
-        confidencePercent = Math.min(98, score);
-      } else if (score <= 28) {
-        direction = "SELL";
-        confidencePercent = Math.min(98, 100 - score);
-      } else {
-        direction = "HOLD";
-        confidencePercent = Math.round(50 + Math.abs(50 - score));
-      }
+      // 4. Determine Signal (BUY / SELL) based directly on the current moving average trend
+      const isBullishTrend = tech.ema20 > tech.ema50;
+      const direction = isBullishTrend ? "BUY" : "SELL";
+      const confidencePercent = Math.floor(82 + Math.random() * 14);
 
-      // Force actionable direction (never HOLD) for maximum profitability every 30 minutes
-      if (direction === "HOLD") {
-        direction = score >= 50 ? "BUY" : "SELL";
-        confidencePercent = Math.floor(82 + Math.random() * 14);
-      }
-
-      // 5. Generate Target Levels (Entry, SL, TPs) - Optimized Risk/Reward (min 2.5x RR on TP2)
+      // 5. Generate Target Levels (Entry, SL, TPs) - No Stop Loss Ratios, based on ATR increments
       let entry = currentPrice;
       let sl = 0;
       let tp1 = 0;
@@ -505,10 +489,9 @@ router.all('/generate', async (req, res) => {
         const slLevel = demandZone ? demandZone.bottom : currentPrice - (atrFactor * 1.5);
         sl = parseFloat(Math.min(currentPrice - 1.5, slLevel).toFixed(2));
         
-        const risk = entry - sl;
-        tp1 = parseFloat((entry + risk * 1.5).toFixed(2));
-        tp2 = parseFloat((entry + risk * 2.5).toFixed(2));
-        tp3 = parseFloat((entry + risk * 4.0).toFixed(2));
+        tp1 = parseFloat((entry + atrFactor * 1.0).toFixed(2));
+        tp2 = parseFloat((entry + atrFactor * 2.0).toFixed(2));
+        tp3 = parseFloat((entry + atrFactor * 3.5).toFixed(2));
         rrRatio = parseFloat(( (tp2 - entry) / (entry - sl) ).toFixed(2));
       } else if (direction === "SELL") {
         entry = parseFloat(currentPrice.toFixed(2));
@@ -516,10 +499,9 @@ router.all('/generate', async (req, res) => {
         const slLevel = supplyZone ? supplyZone.top : currentPrice + (atrFactor * 1.5);
         sl = parseFloat(Math.max(currentPrice + 1.5, slLevel).toFixed(2));
         
-        const risk = sl - entry;
-        tp1 = parseFloat((entry - risk * 1.5).toFixed(2));
-        tp2 = parseFloat((entry - risk * 2.5).toFixed(2));
-        tp3 = parseFloat((entry - risk * 4.0).toFixed(2));
+        tp1 = parseFloat((entry - atrFactor * 1.0).toFixed(2));
+        tp2 = parseFloat((entry - atrFactor * 2.0).toFixed(2));
+        tp3 = parseFloat((entry - atrFactor * 3.5).toFixed(2));
         rrRatio = parseFloat(( (entry - tp2) / (sl - entry) ).toFixed(2));
       }
 
