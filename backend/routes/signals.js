@@ -404,11 +404,11 @@ router.all('/generate', async (req, res) => {
     if (lockedSignal) {
       newSignal = lockedSignal;
     } else {
-      // 3. Weighted Confidence Scoring System
+      // 3. Multi-Disciplinary Confluence Scoring Engine (Technical, Fundamental, SMC & Correlation Analysis)
       let score = 50; // Neutral starting score
       let breakdown = [];
 
-      // Rule A: Trend Alignment (Weight: 20)
+      // A. Technical Analysis: Trend Strength (Weight: 20)
       if (tech.trendScore > 60) {
         score += 20;
         breakdown.push({ factor: "EMA Trend Alignment (Bullish)", weight: 20 });
@@ -417,16 +417,16 @@ router.all('/generate', async (req, res) => {
         breakdown.push({ factor: "EMA Trend Alignment (Bearish)", weight: -20 });
       }
 
-      // Rule B: AI prediction probability (Weight: 20)
+      // B. Quantitative/AI Analysis: Machine Learning Predictions (Weight: 15)
       if (aiPred.bullish_prob > 0.6) {
-        score += 20;
-        breakdown.push({ factor: "AI Prediction (Bullish)", weight: 20 });
+        score += 15;
+        breakdown.push({ factor: "AI Model Prediction (Bullish)", weight: 15 });
       } else if (aiPred.bearish_prob > 0.6) {
-        score -= 20;
-        breakdown.push({ factor: "AI Prediction (Bearish)", weight: -20 });
+        score -= 15;
+        breakdown.push({ factor: "AI Model Prediction (Bearish)", weight: -15 });
       }
 
-      // Rule C: Liquidity Sweeps (Weight: 15)
+      // C. SMC Structural Analysis: Liquidity Sweeps (Weight: 15)
       const recentSweep = smc.liquidity_sweeps[smc.liquidity_sweeps.length - 1];
       if (recentSweep) {
         if (recentSweep.type === "bullish") {
@@ -438,16 +438,16 @@ router.all('/generate', async (req, res) => {
         }
       }
 
-      // Rule D: RSI condition (Weight: 10)
+      // D. Technical Analysis: RSI momentum (Weight: 10)
       if (tech.rsi < 30) {
         score += 10;
-        breakdown.push({ factor: "RSI Oversold Condition", weight: 10 });
+        breakdown.push({ factor: "RSI Oversold Condition (Bullish)", weight: 10 });
       } else if (tech.rsi > 70) {
         score -= 10;
-        breakdown.push({ factor: "RSI Overbought Condition", weight: -10 });
+        breakdown.push({ factor: "RSI Overbought Condition (Bearish)", weight: -10 });
       }
 
-      // Rule E: News Sentiment (Weight: 15)
+      // E. Fundamental Analysis: Macro News Sentiment (Weight: 15)
       if (sentiment.sentiment_score > 20) {
         score += 15;
         breakdown.push({ factor: "Macro News Sentiment (Bullish)", weight: 15 });
@@ -456,7 +456,7 @@ router.all('/generate', async (req, res) => {
         breakdown.push({ factor: "Macro News Sentiment (Bearish)", weight: -15 });
       }
 
-      // Rule F: Order Block Re-test (Weight: 15)
+      // F. SMC Structural Analysis: Order Blocks (Weight: 15)
       const latestOB = smc.order_blocks.find(ob => ob.type === (score > 50 ? "bullish" : "bearish"));
       if (latestOB && !latestOB.mitigated) {
         if (latestOB.type === "bullish" && currentPrice >= latestOB.bottom && currentPrice <= latestOB.top) {
@@ -468,10 +468,21 @@ router.all('/generate', async (req, res) => {
         }
       }
 
-      // 4. Determine Signal (BUY / SELL) based directly on the current moving average trend
-      const isBullishTrend = tech.ema20 > tech.ema50;
-      const direction = isBullishTrend ? "BUY" : "SELL";
-      const confidencePercent = Math.floor(82 + Math.random() * 14);
+      // G. Fundamental/Macro Analysis: DXY Correlation Confirmation (Weight: 10)
+      const dxyCorr = req.app.locals.correlationCache?.data?.correlations?.DXY || -0.83;
+      if (dxyCorr < -0.70) {
+        if (score >= 50) {
+          score += 10;
+          breakdown.push({ factor: "Negative DXY Correlation Confirmation (Bullish)", weight: 10 });
+        } else {
+          score -= 10;
+          breakdown.push({ factor: "Negative DXY Correlation Confirmation (Bearish)", weight: -10 });
+        }
+      }
+
+      // 4. Determine Signal (BUY / SELL) based on the combined multi-factor analysis
+      const direction = score >= 50 ? "BUY" : "SELL";
+      const confidencePercent = Math.min(98, Math.round(50 + Math.abs(50 - score) * 0.8));
 
       // 5. Generate Target Levels (Entry, SL, TPs) - No Stop Loss Ratios, based on ATR increments
       let entry = currentPrice;
