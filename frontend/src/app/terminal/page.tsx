@@ -36,6 +36,13 @@ interface Signal {
   };
   technicalIndicators?: any;
   aiPredictions?: any;
+  timeframeAnalyses?: {
+    daily: string;
+    h4: string;
+    h1: string;
+    m15: string;
+    m5: string;
+  };
 }
 
 export default function TerminalPage() {
@@ -639,16 +646,26 @@ export default function TerminalPage() {
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <div className={`px-4 py-2 rounded text-base font-black tracking-widest font-mono text-center ${activeSignal.direction === 'BUY' ? 'bg-emerald-950/40 text-emerald-500 border border-emerald-500/30' : activeSignal.direction === 'SELL' ? 'bg-red-950/40 text-red-500 border border-red-500/30' : 'bg-obsidian-900 text-gray-400 border border-gold-900/10'}`}>
+                  <div className={`px-4 py-2 rounded text-base font-black tracking-widest font-mono text-center ${activeSignal.direction === 'BUY' ? 'bg-emerald-950/40 text-emerald-500 border border-emerald-500/30' : activeSignal.direction === 'SELL' ? 'bg-red-950/40 text-red-500 border border-red-500/30' : 'bg-obsidian-900 text-gold-500 border border-gold-500/20'}`}>
                     {activeSignal.direction}
                   </div>
                   <div>
                     <h4 className="text-sm font-bold text-gray-200">Ensemble Setup</h4>
-                    <span className="text-[10px] text-gray-500 font-mono">RR Ratio: {activeSignal.riskRewardRatio || 'N/A'}</span>
+                    <span className="text-[10px] text-gray-500 font-mono">Risk Level: {activeSignal.riskLevel}</span>
                   </div>
                 </div>
 
-                {activeSignal.direction !== "HOLD" && (
+                {activeSignal.direction !== "BUY" && activeSignal.direction !== "SELL" ? (
+                  <div className="border border-gold-500/10 bg-obsidian-950/40 p-4 rounded text-center space-y-2.5">
+                    <ShieldAlert className="w-8 h-8 text-gold-500 mx-auto animate-pulse" />
+                    <h5 className="text-[11px] font-mono text-gold-500 uppercase font-black tracking-wider">
+                      CONFLUENCE SCANNER: WAITING
+                    </h5>
+                    <p className="text-[10px] font-mono text-gray-400 leading-relaxed">
+                      Market confluences are weak or conflicting. Re-evaluating daily macro biases, directional trends, news, and DXY correlation maps. Avoid low-probability trades.
+                    </p>
+                  </div>
+                ) : (
                   <div className="space-y-2 border-y border-gold-900/10 py-3.5 font-mono text-xs">
                     <div className="flex justify-between">
                       <span className="text-gray-400">ENTRY TRIGGER:</span>
@@ -717,6 +734,38 @@ export default function TerminalPage() {
             ) : (
               <div className="text-center font-mono text-xs text-gray-500 py-20">Computing market signals...</div>
             )}
+          </div>
+
+          {/* Multi-Timeframe Bias Map */}
+          <div className="glass-panel rounded-lg p-5 space-y-3.5 font-mono text-xs">
+            <h3 className="text-xs font-bold text-gray-200 flex items-center gap-2">
+              <Layers className="w-3.5 h-3.5 text-gold-500" /> MULTI-TIMEFRAME BIAS MAP
+            </h3>
+            <div className="grid grid-cols-5 gap-1.5 text-center text-[10px]">
+              {[
+                { label: "DAILY", status: activeSignal?.timeframeAnalyses?.daily || "Neutral" },
+                { label: "4H", status: activeSignal?.timeframeAnalyses?.h4 || "Neutral" },
+                { label: "1H", status: activeSignal?.timeframeAnalyses?.h1 || "Neutral" },
+                { label: "15M", status: activeSignal?.timeframeAnalyses?.m15 || "Neutral" },
+                { label: "5M", status: activeSignal?.timeframeAnalyses?.m5 || "Neutral" }
+              ].map((tf, i) => {
+                const isBullish = tf.status.toLowerCase().includes("bullish");
+                const isBearish = tf.status.toLowerCase().includes("bearish");
+                const colorClass = isBullish 
+                  ? "bg-emerald-950/30 text-emerald-500 border-emerald-500/20" 
+                  : isBearish 
+                  ? "bg-red-950/30 text-red-500 border-red-500/20" 
+                  : "bg-obsidian-950 text-gray-500 border-gold-900/10";
+                return (
+                  <div key={i} className={`py-2 px-1 rounded border flex flex-col items-center justify-between min-h-[48px] ${colorClass}`}>
+                    <span className="font-bold text-[8px] opacity-60">{tf.label}</span>
+                    <span className="text-[8px] font-black tracking-tighter truncate w-full uppercase">
+                      {isBullish ? "BUY" : isBearish ? "SELL" : "HOLD"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           {/* AI prediction meters */}

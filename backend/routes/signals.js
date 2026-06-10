@@ -404,95 +404,154 @@ router.all('/generate', async (req, res) => {
     if (lockedSignal) {
       newSignal = lockedSignal;
     } else {
+      // Calculate Multi-Timeframe Technical Indicators
+      const dailyCandles = getCandlesHelper(req, 'Daily', 40);
+      const h4Candles = getCandlesHelper(req, '4H', 40);
+      const h1Candles = getCandlesHelper(req, '1H', 40);
+      const m15Candles = getCandlesHelper(req, '15m', 40);
+      const m5Candles = getCandlesHelper(req, '5m', 40);
+
+      const dailyTech = calculateTechnicalIndicators(dailyCandles);
+      const h4Tech = calculateTechnicalIndicators(h4Candles);
+      const h1Tech = calculateTechnicalIndicators(h1Candles);
+      const m15Tech = calculateTechnicalIndicators(m15Candles);
+      const m5Tech = calculateTechnicalIndicators(m5Candles);
+
       // 3. Multi-Disciplinary Confluence Scoring Engine (Technical, Fundamental, SMC & Correlation Analysis)
-      let score = 50; // Neutral starting score
-      let breakdown = [];
+      let finalScore = 50; // Neutral starting score
+      let confluences = [];
 
-      // A. Technical Analysis: Trend Strength (Weight: 20)
-      if (tech.trendScore > 60) {
-        score += 20;
-        breakdown.push({ factor: "EMA Trend Alignment (Bullish)", weight: 20 });
-      } else if (tech.trendScore < 40) {
-        score -= 20;
-        breakdown.push({ factor: "EMA Trend Alignment (Bearish)", weight: -20 });
+      // A. Multi-Timeframe Trend Filter (+20)
+      const dailyBullish = dailyTech.trendScore >= 50;
+      const h4Bullish = h4Tech.trendScore >= 50;
+      const h1Bullish = h1Tech.trendScore >= 50;
+      const m15Bullish = m15Tech.trendScore >= 50;
+      
+      const macroAligns = (dailyBullish === h4Bullish) && (h4Bullish === h1Bullish);
+      const setupAligns = (m15Bullish === h1Bullish);
+
+      if (macroAligns && setupAligns) {
+        finalScore += 20;
+        confluences.push({ factor: "Macro Timeframe Trend Alignment (Daily/H4/H1/15M)", weight: 20 });
+      } else {
+        finalScore -= 10;
+        confluences.push({ factor: `Conflicting HTF Bias (Daily: ${dailyBullish ? 'BULL' : 'BEAR'} / H4: ${h4Bullish ? 'BULL' : 'BEAR'})`, weight: -10 });
       }
 
-      // B. Quantitative/AI Analysis: Machine Learning Predictions (Weight: 15)
-      if (aiPred.bullish_prob > 0.6) {
-        score += 15;
-        breakdown.push({ factor: "AI Model Prediction (Bullish)", weight: 15 });
-      } else if (aiPred.bearish_prob > 0.6) {
-        score -= 15;
-        breakdown.push({ factor: "AI Model Prediction (Bearish)", weight: -15 });
-      }
-
-      // C. SMC Structural Analysis: Liquidity Sweeps (Weight: 15)
+      // B. SMC Structural Analysis: Liquidity Sweep (+15)
       const recentSweep = smc.liquidity_sweeps[smc.liquidity_sweeps.length - 1];
       if (recentSweep) {
         if (recentSweep.type === "bullish") {
-          score += 15;
-          breakdown.push({ factor: "Liquidity Sweep - SSL (Bullish Rejection)", weight: 15 });
+          finalScore += 15;
+          confluences.push({ factor: "SMC Liquidity Sweep (SSL Reclaimed)", weight: 15 });
         } else if (recentSweep.type === "bearish") {
-          score -= 15;
-          breakdown.push({ factor: "Liquidity Sweep - BSL (Bearish Rejection)", weight: -15 });
+          finalScore -= 15;
+          confluences.push({ factor: "SMC Liquidity Sweep (BSL Rejected)", weight: -15 });
         }
       }
 
-      // D. Technical Analysis: RSI momentum (Weight: 10)
-      if (tech.rsi < 30) {
-        score += 10;
-        breakdown.push({ factor: "RSI Oversold Condition (Bullish)", weight: 10 });
-      } else if (tech.rsi > 70) {
-        score -= 10;
-        breakdown.push({ factor: "RSI Overbought Condition (Bearish)", weight: -10 });
-      }
-
-      // E. Fundamental Analysis: Macro News Sentiment (Weight: 15)
-      if (sentiment.sentiment_score > 20) {
-        score += 15;
-        breakdown.push({ factor: "Macro News Sentiment (Bullish)", weight: 15 });
-      } else if (sentiment.sentiment_score < -20) {
-        score -= 15;
-        breakdown.push({ factor: "Macro News Sentiment (Bearish)", weight: -15 });
-      }
-
-      // F. SMC Structural Analysis: Order Blocks (Weight: 15)
-      const latestOB = smc.order_blocks.find(ob => ob.type === (score > 50 ? "bullish" : "bearish"));
-      if (latestOB && !latestOB.mitigated) {
+      // C. SMC Structural Analysis: Order Blocks (+15)
+      const latestOB = smc.order_blocks.find(ob => !ob.mitigated);
+      if (latestOB) {
         if (latestOB.type === "bullish" && currentPrice >= latestOB.bottom && currentPrice <= latestOB.top) {
-          score += 15;
-          breakdown.push({ factor: "Demand Order Block Re-test", weight: 15 });
+          finalScore += 15;
+          confluences.push({ factor: "Demand Order Block Re-test (Bullish)", weight: 15 });
         } else if (latestOB.type === "bearish" && currentPrice >= latestOB.bottom && currentPrice <= latestOB.top) {
-          score -= 15;
-          breakdown.push({ factor: "Supply Order Block Re-test", weight: -15 });
+          finalScore -= 15;
+          confluences.push({ factor: "Supply Order Block Re-test (Bearish)", weight: -15 });
         }
       }
 
-      // G. Fundamental/Macro Analysis: DXY Correlation Confirmation (Weight: 10)
-      const dxyCorr = req.app.locals.correlationCache?.data?.correlations?.DXY || -0.83;
-      if (dxyCorr < -0.70) {
-        if (score >= 50) {
-          score += 10;
-          breakdown.push({ factor: "Negative DXY Correlation Confirmation (Bullish)", weight: 10 });
+      // D. AI prediction probabilities (+20)
+      if (aiPred.bullish_prob > 0.8) {
+        finalScore += 20;
+        confluences.push({ factor: `AI Ensemble Bullish Conviction (${(aiPred.bullish_prob * 100).toFixed(0)}%)`, weight: 20 });
+      } else if (aiPred.bearish_prob > 0.8) {
+        finalScore -= 20;
+        confluences.push({ factor: `AI Ensemble Bearish Conviction (${(aiPred.bearish_prob * 100).toFixed(0)}%)`, weight: -20 });
+      }
+
+      // E. News & Macro Sentiment Filter (+10)
+      if (sentiment.sentiment_score > 25) {
+        finalScore += 10;
+        confluences.push({ factor: "Macro News Sentiment (Bullish Bias)", weight: 10 });
+      } else if (sentiment.sentiment_score < -25) {
+        finalScore -= 10;
+        confluences.push({ factor: "Macro News Sentiment (Bearish Bias)", weight: -10 });
+      }
+
+      // F. Technical Indicator: Volume Confirmation (+10)
+      const avgVol = candles.slice(-10).reduce((sum, c) => sum + c.volume, 0) / 10;
+      const volRatio = latestCandle.volume / (avgVol + 1e-9);
+      if (volRatio > 1.25) {
+        if (tech.trendScore >= 50) {
+          finalScore += 10;
+          confluences.push({ factor: "High-Volume Breakout Confirmation (Bullish)", weight: 10 });
         } else {
-          score -= 10;
-          breakdown.push({ factor: "Negative DXY Correlation Confirmation (Bearish)", weight: -10 });
+          finalScore -= 10;
+          confluences.push({ factor: "High-Volume Breakout Confirmation (Bearish)", weight: -10 });
         }
       }
 
-      // 4. Determine Signal (BUY / SELL) based on the combined multi-factor analysis
-      const direction = score >= 50 ? "BUY" : "SELL";
-      const confidencePercent = Math.min(98, Math.round(50 + Math.abs(50 - score) * 0.8));
+      // G. Macro Correlation Filter (+10)
+      const dxyCorr = req.app.locals.correlationCache?.data?.correlations?.DXY || -0.83;
+      if (dxyCorr < -0.75) {
+        if (tech.trendScore >= 50) {
+          finalScore += 10;
+          confluences.push({ factor: "DXY Macro Correlation (Risk-Off Gold Bid)", weight: 10 });
+        } else {
+          finalScore -= 10;
+          confluences.push({ factor: "DXY Macro Correlation (Risk-On Gold Outflow)", weight: -10 });
+        }
+      }
 
-      // 5. Generate Target Levels (Entry, SL, TPs) - No Stop Loss Ratios, based on ATR increments
+      // H. Volatility / News Safety Locks & retail indicator filters
+      if (tech.volatilityScore > 80 || Math.abs(sentiment.sentiment_score) > 60) {
+        finalScore = 50 + (finalScore - 50) * 0.2;
+        confluences.push({ factor: "High Impact News Volatility Safety Filter (Restricted)", weight: 0 });
+      }
+
+      const atrFactor = Math.max(1.2, tech.atr);
+      if (atrFactor < 1.8) {
+        finalScore = 50 + (finalScore - 50) * 0.4;
+        confluences.push({ factor: "Low Volatility Consolidation Filter (Restricted)", weight: 0 });
+      }
+
+      if (tech.rsi > 75 && finalScore >= 75) {
+        finalScore = 60;
+        confluences.push({ factor: "RSI Extremely Overbought Filter (Locked BUY)", weight: -10 });
+      }
+      if (tech.rsi < 25 && finalScore <= 25) {
+        finalScore = 40;
+        confluences.push({ factor: "RSI Extremely Oversold Filter (Locked SELL)", weight: 10 });
+      }
+
+      // 4. Determine Signal (BUY / SELL / HOLD / NO TRADE)
+      let direction = "HOLD";
+      let confidencePercent = 50;
+      let riskLevel = "Medium";
+
+      if (finalScore >= 75) {
+        direction = "BUY";
+        confidencePercent = Math.round(finalScore);
+        riskLevel = finalScore >= 90 ? "Low" : "Medium";
+      } else if (finalScore <= 25) {
+        direction = "SELL";
+        confidencePercent = Math.round(100 - finalScore);
+        riskLevel = finalScore <= 10 ? "Low" : "Medium";
+      } else {
+        direction = finalScore >= 60 ? "HOLD" : "NO TRADE";
+        confidencePercent = Math.round(50 + Math.abs(50 - finalScore));
+        riskLevel = "High";
+      }
+
+      // 5. Generate Target Levels (Entry, SL, TPs)
       let entry = currentPrice;
       let sl = 0;
       let tp1 = 0;
       let tp2 = 0;
       let tp3 = 0;
       let rrRatio = 0;
-      
-      const atrFactor = Math.max(1.2, tech.atr);
 
       if (direction === "BUY") {
         entry = parseFloat(currentPrice.toFixed(2));
@@ -521,19 +580,26 @@ router.all('/generate', async (req, res) => {
         timestamp: new Date().toISOString(),
         symbol: "XAUUSD",
         direction: direction,
-        entry: entry,
-        stopLoss: sl,
-        takeProfit1: tp1,
-        takeProfit2: tp2,
-        takeProfit3: tp3,
-        riskRewardRatio: rrRatio,
+        entry: direction === "BUY" || direction === "SELL" ? entry : null,
+        stopLoss: direction === "BUY" || direction === "SELL" ? sl : null,
+        takeProfit1: direction === "BUY" || direction === "SELL" ? tp1 : null,
+        takeProfit2: direction === "BUY" || direction === "SELL" ? tp2 : null,
+        takeProfit3: direction === "BUY" || direction === "SELL" ? tp3 : null,
+        riskRewardRatio: direction === "BUY" || direction === "SELL" ? rrRatio : null,
         confidenceScore: confidencePercent,
-        riskLevel: confidencePercent > 80 ? "Low" : confidencePercent > 65 ? "Medium" : "High",
-        confluences: breakdown,
+        riskLevel: riskLevel,
+        confluences: confluences,
         engineConnected: engineConnected,
         smcLevels: smc,
         technicalIndicators: tech,
-        aiPredictions: aiPred
+        aiPredictions: aiPred,
+        timeframeAnalyses: {
+          daily: dailyTech.bullishIndication,
+          h4: h4Tech.bullishIndication,
+          h1: h1Tech.bullishIndication,
+          m15: m15Tech.bullishIndication,
+          m5: m5Tech.bullishIndication
+        }
       };
 
       activeSignalCache = newSignal;
